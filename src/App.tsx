@@ -9,12 +9,13 @@ import { SyncConfirmation } from "@/components/sync-confirmation";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import { HomePage } from "@/components/home-page";
-import { Settings, Download, ShoppingCart, FileText, Home } from "lucide-react";
+import { Settings, Download, ShoppingCart, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api";
+import { Logo } from "@/components/logo";
 
 const THREAD_COUNT_KEY = 'sync_thread_count';
-const CURRENT_VERSION = '1.0.3'; // This should be updated by the developer for each release
+const CURRENT_VERSION = '1.0.4'; // This should be updated by the developer for each release
 
 interface UpdateInfo {
     version: string;
@@ -112,7 +113,7 @@ export const App = () => {
             <Sidebar>
                 <SidebarHeader>
                     <div className="flex items-center space-x-2">
-                        <FileText className="h-6 w-6" />
+                        <Logo />
                         <span className="font-semibold">ACGStation Sync</span>
                     </div>
                 </SidebarHeader>

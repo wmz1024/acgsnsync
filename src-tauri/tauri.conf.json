@@ -7,7 +7,7 @@
   },
   "package": {
     "productName": "ACGStation Sync",
-    "version": "1.0.8"
+    "version": "1.0.9"
   },
   "tauri": {
     "allowlist": {

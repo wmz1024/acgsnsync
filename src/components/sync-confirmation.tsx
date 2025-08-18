@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
+import { Checkbox } from './ui/checkbox';
 import { invoke } from '@tauri-apps/api';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowLeft, AlertCircle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, AlertCircle, RefreshCw, Check, AlertTriangle as AlertTriangleIcon } from 'lucide-react';
 import { Progress } from './ui/progress';
 import { ScrollArea } from './ui/scroll-area';
 import { ExclusionEditor } from './exclusion-editor';
@@ -12,6 +13,10 @@ import { TargetDirectorySelector } from './target-directory-selector';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+interface SyncLog {
+    type: 'success' | 'error';
+    message: string;
+}
 
 interface SyncConfirmationProps {
   manifestUrl: string;
@@ -23,6 +28,8 @@ interface Manifest {
   package_name?: string;
   version: string;
   description?: string;
+  disableHashCheck?: boolean;
+  disableSizeCheck?: boolean;
   files: ManifestFile[];
 }
 
@@ -78,6 +85,9 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
   const [fileProgress, setFileProgress] = useState<DownloadProgress | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isExclusionEditorOpen, setIsExclusionEditorOpen] = useState(false);
+  const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
+  const [overrideDisableHashCheck, setOverrideDisableHashCheck] = useState(false);
+  const [overrideDisableSizeCheck, setOverrideDisableSizeCheck] = useState(false);
 
   const fileTree = useMemo(() => buildFileTree(fileDiff), [fileDiff]);
 
@@ -118,6 +128,8 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
 
     let unlistenOverall: () => void;
     let unlistenFile: () => void;
+    let unlistenSuccess: () => void;
+    let unlistenError: () => void;
 
     const setupListeners = async () => {
       unlistenOverall = await listen<number>('OVERALL_PROGRESS', (event) => {
@@ -126,6 +138,12 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
       unlistenFile = await listen<DownloadProgress>('DOWNLOAD_PROGRESS', (event) => {
         setFileProgress(event.payload);
       });
+      unlistenSuccess = await listen<string>('DOWNLOAD_SUCCESS', (event) => {
+        setSyncLogs(prev => [...prev, { type: 'success', message: `成功: ${event.payload}` }]);
+      });
+      unlistenError = await listen<string>('DOWNLOAD_ERROR', (event) => {
+        setSyncLogs(prev => [...prev, { type: 'error', message: `错误: ${event.payload}` }]);
+      });
     };
 
     setupListeners();
@@ -133,6 +151,8 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
     return () => {
       if (unlistenOverall) unlistenOverall();
       if (unlistenFile) unlistenFile();
+      if (unlistenSuccess) unlistenSuccess();
+      if (unlistenError) unlistenError();
     };
   }, [manifestUrl]);
 
@@ -149,6 +169,8 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
                 manifest,
                 targetDir,
                 excludedFiles,
+                overrideDisableHashCheck,
+                overrideDisableSizeCheck,
             });
             setFileDiff(diffResult);
         } catch (e: any) {
@@ -158,7 +180,7 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
         }
     };
     calculateDiff();
-  }, [targetDir, manifest, excludedFiles]);
+  }, [targetDir, manifest, excludedFiles, overrideDisableHashCheck, overrideDisableSizeCheck]);
 
 
   const handleDirectorySelected = async (path: string) => {
@@ -177,6 +199,7 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
     setIsDownloading(true);
     setOverallProgress(0);
     setFileProgress(null);
+    setSyncLogs([]);
 
     try {
       // Save the exclusion list before starting the download
@@ -187,6 +210,8 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
         manifest,
         targetDir,
         excludedFiles,
+        overrideDisableHashCheck,
+        overrideDisableSizeCheck,
       });
     } catch (e: any) {
       setError(`下载启动失败: ${e.toString()}`);
@@ -237,6 +262,36 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
        
       <TargetDirectorySelector onDirectorySelect={handleDirectorySelected} disabled={isCalculatingDiff || isDownloading} />
 
+       <Card className="mt-4">
+            <CardHeader>
+                <CardTitle>同步选项</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                 <div className="flex items-center space-x-2">
+                    <Checkbox
+                        id="override-disable-hash-check"
+                        checked={overrideDisableHashCheck}
+                        onCheckedChange={(checked) => setOverrideDisableHashCheck(!!checked)}
+                        disabled={isDownloading}
+                    />
+                    <label htmlFor="override-disable-hash-check" className="text-sm font-medium">
+                        禁用哈希校验 (覆盖清单设置)
+                    </label>
+                </div>
+                <div className="flex items-center space-x-2">
+                    <Checkbox
+                        id="override-disable-size-check"
+                        checked={overrideDisableSizeCheck}
+                        onCheckedChange={(checked) => setOverrideDisableSizeCheck(!!checked)}
+                        disabled={isDownloading}
+                    />
+                    <label htmlFor="override-disable-size-check" className="text-sm font-medium">
+                        禁用大小校验 (覆盖清单设置)
+                    </label>
+                </div>
+            </CardContent>
+        </Card>
+
        <div className="flex-grow mt-4 overflow-auto">
          <h3 className="text-lg font-semibold mb-2">
             {targetDir ? `同步计划: ${targetDir}` : '同步计划'}
@@ -273,6 +328,24 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
                  正在下载: {fileProgress.file} ({fileProgress.progress.toFixed(2)}%)
                </div>
              )}
+             
+            <Card className="mt-4">
+                <CardHeader>
+                    <CardTitle>同步日志</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <ScrollArea className="h-48">
+                        <div className="space-y-2 text-xs">
+                            {syncLogs.map((log, index) => (
+                                <div key={index} className={`flex items-start ${log.type === 'error' ? 'text-red-500' : 'text-green-500'}`}>
+                                    {log.type === 'success' ? <Check className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" /> : <AlertTriangleIcon className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />}
+                                    <pre className="whitespace-pre-wrap font-sans">{log.message}</pre>
+                                </div>
+                            ))}
+                        </div>
+                    </ScrollArea>
+                </CardContent>
+            </Card>
            </div>
          ) : (
            <Button className="w-full" disabled={!targetDir || isCalculatingDiff} onClick={handleStartSync}>开始同步</Button>

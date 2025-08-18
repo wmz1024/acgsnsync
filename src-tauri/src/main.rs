@@ -60,6 +60,10 @@ struct ExportSettings {
     download_prefix: String,
     version: String,
     description: Option<String>,
+    #[serde(rename = "disableHashCheck")]
+    disable_hash_check: Option<bool>,
+    #[serde(rename = "disableSizeCheck")]
+    disable_size_check: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,6 +84,10 @@ struct ExportManifest {
     package_name: String,
     version: String,
     description: Option<String>,
+    #[serde(rename = "disableHashCheck")]
+    disable_hash_check: Option<bool>,
+    #[serde(rename = "disableSizeCheck")]
+    disable_size_check: Option<bool>,
     files: Vec<ExportedFile>,
     created_at: String,
 }
@@ -197,6 +205,7 @@ fn add_directory_to_zip<W: Write + std::io::Seek>(
     dir_path: &Path,
     base_path: &Path,
     should_compress: bool,
+    disable_hash_check: bool,
 ) -> Result<Vec<ExportedFile>, String> {
     let mut exported_files = Vec::new();
     
@@ -211,7 +220,7 @@ fn add_directory_to_zip<W: Write + std::io::Seek>(
             let relative_path_str = relative_path.to_string_lossy().replace('\\', "/");
             
             // 计算文件hash
-            let hash = calculate_file_hash(path).map_err(|e| e.to_string())?;
+            let hash = if disable_hash_check { "DISABLED".to_string() } else { calculate_file_hash(path).map_err(|e| e.to_string())? };
             let size = fs::metadata(path)
                 .map_err(|e| format!("Failed to get file metadata: {}", e))?
                 .len();
@@ -250,6 +259,7 @@ fn add_file_to_zip<W: Write + std::io::Seek>(
     zip: &mut ZipWriter<W>,
     file_path: &Path,
     base_path: &Path,
+    disable_hash_check: bool,
 ) -> Result<ExportedFile, String> {
     let relative_path = file_path.strip_prefix(base_path)
         .map_err(|e| format!("Failed to get relative path: {}", e))?;
@@ -257,7 +267,7 @@ fn add_file_to_zip<W: Write + std::io::Seek>(
     let relative_path_str = relative_path.to_string_lossy().replace('\\', "/");
     
     // 计算文件hash
-    let hash = calculate_file_hash(file_path).map_err(|e| e.to_string())?;
+    let hash = if disable_hash_check { "DISABLED".to_string() } else { calculate_file_hash(file_path).map_err(|e| e.to_string())? };
     let size = fs::metadata(file_path)
         .map_err(|e| format!("Failed to get file metadata: {}", e))?
         .len();
@@ -306,6 +316,8 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
         first_file_path.parent().unwrap_or(first_file_path)
     };
     
+    let disable_hash_check = settings.disable_hash_check.unwrap_or(false);
+
     for file_item in files.iter().filter(|f| f.selected) {
         let file_path = Path::new(&file_item.path);
         
@@ -323,7 +335,7 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
                     .map_err(|e| format!("Failed to create temp zip: {}", e))?;
                 
                 let mut temp_zip = ZipWriter::new(temp_zip_file);
-                let _folder_files = add_directory_to_zip(&mut temp_zip, file_path, file_path, true)?;
+                let _folder_files = add_directory_to_zip(&mut temp_zip, file_path, file_path, true, disable_hash_check)?;
                 temp_zip.finish().map_err(|e| format!("Failed to finish temp zip: {}", e))?;
                 
                 // 将子zip添加到主zip
@@ -337,7 +349,7 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
                     .map_err(|e| format!("Failed to copy temp zip: {}", e))?;
                 
                 // 计算压缩文件的hash
-                let hash = calculate_file_hash(&temp_zip_path).map_err(|e| e.to_string())?;
+                let hash = if disable_hash_check { "DISABLED".to_string() } else { calculate_file_hash(&temp_zip_path).map_err(|e| e.to_string())? };
                 let size = fs::metadata(&temp_zip_path)
                     .map_err(|e| format!("Failed to get temp zip metadata: {}", e))?
                     .len();
@@ -363,12 +375,12 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
                 let _ = fs::remove_file(&temp_zip_path);
             } else {
                 // 直接添加文件夹内容
-                let folder_files = add_directory_to_zip(&mut zip, file_path, base_path, false)?;
+                let folder_files = add_directory_to_zip(&mut zip, file_path, base_path, false, disable_hash_check)?;
                 exported_files.extend(folder_files);
             }
         } else {
             // 处理单个文件
-            let exported_file = add_file_to_zip(&mut zip, file_path, base_path)?;
+            let exported_file = add_file_to_zip(&mut zip, file_path, base_path, disable_hash_check)?;
             exported_files.push(exported_file);
         }
     }
@@ -378,6 +390,8 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
         package_name: settings.package_name.clone(),
         version: settings.version,
         description: settings.description,
+        disable_hash_check: settings.disable_hash_check,
+        disable_size_check: settings.disable_size_check,
         files: exported_files.iter().map(|f| ExportedFile {
             name: f.name.clone(),
             download_url: f.download_url.replace("{download_prefix}", &settings.download_prefix),
@@ -404,7 +418,16 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
 }
 
 #[tauri::command]
-fn calculate_diff(manifest: Manifest, target_dir: String, excluded_files: Vec<String>) -> Result<Vec<DiffFile>, String> {
+fn calculate_diff(
+    manifest: Manifest, 
+    target_dir: String, 
+    excluded_files: Vec<String>,
+    override_disable_hash_check: bool,
+    override_disable_size_check: bool,
+) -> Result<Vec<DiffFile>, String> {
+    let disable_hash_check = override_disable_hash_check || manifest.disable_hash_check.unwrap_or(false);
+    let disable_size_check = override_disable_size_check || manifest.disable_size_check.unwrap_or(false);
+
     let top_level_dirs: HashSet<String> = manifest.files.iter()
         .filter_map(|file| {
             Path::new(&file.relative_path).components().next().and_then(|comp| {
@@ -439,10 +462,24 @@ fn calculate_diff(manifest: Manifest, target_dir: String, excluded_files: Vec<St
 
             let local_path = std::path::Path::new(&target_dir).join(&path_str);
             match local_files.get(&local_path) {
-                Some(local_hash) if local_hash == &file.hash => {
+                Some(local_hash) if !disable_hash_check && local_hash == &file.hash => {
                     DiffFile { path: path_str, status: FileStatus::Unchanged }
                 }
-                Some(_) => {
+                Some(_local_hash) => {
+                    if disable_hash_check {
+                        if disable_size_check {
+                             // Both checks disabled, file exists, so unchanged
+                            return DiffFile { path: path_str, status: FileStatus::Unchanged };
+                        } else {
+                            // Hash check disabled, size check enabled
+                            if let Ok(metadata) = fs::metadata(&local_path) {
+                                if metadata.len() == file.size {
+                                    return DiffFile { path: path_str, status: FileStatus::Unchanged };
+                                }
+                            }
+                        }
+                    }
+                    // A check failed
                     DiffFile { path: path_str, status: FileStatus::Modified }
                 }
                 None => {
@@ -541,7 +578,12 @@ async fn start_download(
     manifest: Manifest,
     target_dir: String,
     excluded_files: Vec<String>,
+    override_disable_hash_check: bool,
+    override_disable_size_check: bool,
 ) -> Result<(), String> {
+    let disable_hash_check = override_disable_hash_check || manifest.disable_hash_check.unwrap_or(false);
+    let disable_size_check = override_disable_size_check || manifest.disable_size_check.unwrap_or(false);
+
     // Step 1: Determine top-level directories and scan only those
     let top_level_dirs: HashSet<String> = manifest.files.iter()
         .filter_map(|file| {
@@ -573,12 +615,25 @@ async fn start_download(
 
         let local_path = std::path::Path::new(&target_dir).join(&file.relative_path);
         match local_files.get(&local_path) {
-            Some(local_hash) if local_hash == &file.hash => {
+            Some(local_hash) if !disable_hash_check && local_hash == &file.hash => {
                 // File exists and hash matches, skip
                 continue;
             }
+            Some(_) if disable_hash_check => {
+                if disable_size_check {
+                    // Both checks disabled, file exists, skip
+                    continue;
+                } else {
+                    if let Ok(metadata) = fs::metadata(&local_path) {
+                        if metadata.len() == file.size {
+                            // Size matches, skip
+                             continue;
+                        }
+                    }
+                }
+            }
             _ => {
-                // File is new, modified, or was a zip package, so download
+                // File is new, modified, or needs download
                 files_to_download.push(file);
             }
         }
@@ -625,6 +680,8 @@ async fn start_download(
                             eprintln!("Verification/Unzip failed for {}: {}", file.name, e);
                             return; // Stop processing this file
                         }
+
+                        window_clone.emit("DOWNLOAD_SUCCESS", &file.name).unwrap();
 
                         let mut completed_count = completed_files_clone.lock().unwrap();
                         *completed_count += 1;
@@ -753,7 +810,7 @@ fn verify_and_unzip(
     // 2. If not an auto-extract package, proceed to verify hash for regular files.
     let calculated_hash = calculate_file_hash(path).map_err(|e| e.to_string())?;
 
-    if calculated_hash != file_info.hash {
+    if calculated_hash != file_info.hash && file_info.hash != "DISABLED" {
         return Err(format!(
             "Hash mismatch for {}: expected {}, got {}",
             file_info.name, file_info.hash, calculated_hash
@@ -769,6 +826,11 @@ struct Manifest {
     #[serde(rename = "packageName", alias = "package_name")]
     package_name: String,
     version: String,
+    description: Option<String>,
+    #[serde(rename = "disableHashCheck")]
+    disable_hash_check: Option<bool>,
+    #[serde(rename = "disableSizeCheck")]
+    disable_size_check: Option<bool>,
     files: Vec<ManifestFile>,
 }
 

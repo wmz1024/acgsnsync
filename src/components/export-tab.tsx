@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { FolderOpen, Download, Trash2 } from "lucide-react";
 import { EnhancedFileItem } from "@/components/enhanced-file-item";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface FileItem {
   path: string;
@@ -25,7 +26,9 @@ export function ExportTab() {
     packageName: "",
     downloadPrefix: "https://example.com/downloads/",
     version: "1.0.0",
-    description: ""
+    description: "",
+    disableHashCheck: false,
+    disableSizeCheck: false,
   });
 
   const selectFolder = async () => {
@@ -259,6 +262,26 @@ export function ExportTab() {
                   placeholder="输入简介内容..."
                   rows={4}
                 />
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="disable-hash-check"
+                  checked={exportSettings.disableHashCheck}
+                  onCheckedChange={(checked) => setExportSettings(prev => ({ ...prev, disableHashCheck: !!checked }))}
+                />
+                <label htmlFor="disable-hash-check" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                  禁用哈希校验
+                </label>
+              </div>
+              <div className="flex items-center space-x-2">
+                 <Checkbox
+                  id="disable-size-check"
+                  checked={exportSettings.disableSizeCheck}
+                  onCheckedChange={(checked) => setExportSettings(prev => ({ ...prev, disableSizeCheck: !!checked }))}
+                />
+                <label htmlFor="disable-size-check" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                  禁用大小校验
+                </label>
               </div>
             </CardContent>
           </Card>

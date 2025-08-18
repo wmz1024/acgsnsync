@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api";
 
 const THREAD_COUNT_KEY = 'sync_thread_count';
-const CURRENT_VERSION = '1.0.1'; // This should be updated by the developer for each release
+const CURRENT_VERSION = '1.0.3'; // This should be updated by the developer for each release
 
 interface UpdateInfo {
     version: string;

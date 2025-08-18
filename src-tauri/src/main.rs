@@ -3,11 +3,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 use sha2::{Digest, Sha256};
 use zip::{write::FileOptions, ZipWriter};
-use std::io::{Write, Read};
+use std::io::Write;
 use tauri::Window;
 use std::sync::{Arc, Mutex};
 use std::fs::File;
@@ -15,6 +15,29 @@ use std::io::{BufReader, BufWriter};
 use zip::ZipArchive;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use rayon::prelude::*;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct NewsItem {
+  title: String,
+  time: String,
+  content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct UpdateInfo {
+    version: String,
+    url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Modpack {
+  name: String,
+  url: String,
+  description: String,
+  author: String,
+  thumbnail: String,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct FileItem {
@@ -36,6 +59,7 @@ struct ExportSettings {
     #[serde(rename = "downloadPrefix")]
     download_prefix: String,
     version: String,
+    description: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -55,6 +79,7 @@ struct ExportedFile {
 struct ExportManifest {
     package_name: String,
     version: String,
+    description: Option<String>,
     files: Vec<ExportedFile>,
     created_at: String,
 }
@@ -352,6 +377,7 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
     let manifest = ExportManifest {
         package_name: settings.package_name.clone(),
         version: settings.version,
+        description: settings.description,
         files: exported_files.iter().map(|f| ExportedFile {
             name: f.name.clone(),
             download_url: f.download_url.replace("{download_prefix}", &settings.download_prefix),
@@ -379,51 +405,133 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
 
 #[tauri::command]
 fn calculate_diff(manifest: Manifest, target_dir: String, excluded_files: Vec<String>) -> Result<Vec<DiffFile>, String> {
-    let local_files = scan_local_files(&target_dir);
+    let top_level_dirs: HashSet<String> = manifest.files.iter()
+        .filter_map(|file| {
+            Path::new(&file.relative_path).components().next().and_then(|comp| {
+                if let Component::Normal(dir) = comp {
+                    Some(dir.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+
+    let scan_dirs: Vec<PathBuf> = top_level_dirs.iter()
+        .map(|dir| Path::new(&target_dir).join(dir))
+        .collect();
+
+    let local_files: HashMap<PathBuf, String> = scan_local_files(&scan_dirs);
     let mut diff_files = Vec::new();
 
-    let excluded_set: HashSet<_> = excluded_files.into_iter().collect();
+    let excluded_set: HashSet<_> = excluded_files.into_iter().map(|f| f.replace('\\', "/")).collect();
 
-    for file in &manifest.files {
-        let path_str = file.relative_path.clone();
-        if excluded_set.contains(&path_str) {
-            diff_files.push(DiffFile { path: path_str, status: FileStatus::Excluded });
-            continue;
-        }
-
-        if file.file_type == "zip" || file.file_type == "update_package" {
-            diff_files.push(DiffFile { path: path_str, status: FileStatus::ForceUpdate });
-            continue;
-        }
-
-        let local_path = std::path::Path::new(&target_dir).join(&path_str);
-        match local_files.get(&local_path) {
-            Some(local_hash) if local_hash == &file.hash => {
-                diff_files.push(DiffFile { path: path_str, status: FileStatus::Unchanged });
+    let manifest_diff: Vec<DiffFile> = manifest.files.par_iter()
+        .map(|file| {
+            let path_str = file.relative_path.clone();
+            if excluded_set.contains(&path_str) {
+                return DiffFile { path: path_str, status: FileStatus::Excluded };
             }
-            Some(_) => {
-                diff_files.push(DiffFile { path: path_str, status: FileStatus::Modified });
-            }
-            None => {
-                diff_files.push(DiffFile { path: path_str, status: FileStatus::New });
-            }
-        }
-    }
 
-    // Find extra local files
-    let manifest_paths: HashSet<_> = manifest.files.iter().map(|f| std::path::Path::new(&target_dir).join(&f.relative_path)).collect();
-    for (local_path, _) in local_files {
-        if !manifest_paths.contains(&local_path) {
-             if let Ok(rel_path) = local_path.strip_prefix(&target_dir) {
-                let rel_path_str = rel_path.to_string_lossy().to_string();
-                if !excluded_set.contains(&rel_path_str) {
-                    diff_files.push(DiffFile { path: rel_path_str, status: FileStatus::Extra });
+            if file.file_type == "zip" || file.file_type == "update_package" {
+                return DiffFile { path: path_str, status: FileStatus::ForceUpdate };
+            }
+
+            let local_path = std::path::Path::new(&target_dir).join(&path_str);
+            match local_files.get(&local_path) {
+                Some(local_hash) if local_hash == &file.hash => {
+                    DiffFile { path: path_str, status: FileStatus::Unchanged }
+                }
+                Some(_) => {
+                    DiffFile { path: path_str, status: FileStatus::Modified }
+                }
+                None => {
+                    DiffFile { path: path_str, status: FileStatus::New }
                 }
             }
-        }
-    }
+        })
+        .collect();
+
+    diff_files.extend(manifest_diff);
+
+    // Find extra local files
+    let manifest_paths: HashSet<_> = manifest.files.par_iter().map(|f| std::path::Path::new(&target_dir).join(&f.relative_path)).collect();
+    
+    let extra_files: Vec<DiffFile> = local_files.par_iter()
+        .filter_map(|(local_path, _)| {
+            if !manifest_paths.contains(local_path) {
+                if let Ok(rel_path) = local_path.strip_prefix(&target_dir) {
+                    let rel_path_str = rel_path.to_string_lossy().replace('\\', "/");
+                    if !excluded_set.contains(&rel_path_str) {
+                        return Some(DiffFile { path: rel_path_str, status: FileStatus::Extra });
+                    }
+                }
+            }
+            None
+        })
+        .collect();
+
+    diff_files.extend(extra_files);
 
     Ok(diff_files)
+}
+
+#[tauri::command]
+async fn fetch_news() -> Result<Vec<NewsItem>, String> {
+    reqwest::get("https://static.v0.net.cn/news.json")
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<Vec<NewsItem>>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn fetch_modpacks() -> Result<std::collections::HashMap<String, Modpack>, String> {
+    reqwest::get("https://aka.wmz1024.com/modpack.json")
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<std::collections::HashMap<String, Modpack>>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn fetch_manifest_text(url: String) -> Result<String, String> {
+    reqwest::get(&url)
+        .await
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn check_for_updates() -> Result<UpdateInfo, String> {
+    reqwest::get("https://static.v0.net.cn/update.json")
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<UpdateInfo>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_cpu_count() -> usize {
+    num_cpus::get()
+}
+
+#[tauri::command]
+fn get_username() -> String {
+    whoami::username()
+}
+
+#[tauri::command]
+fn set_thread_pool(num_threads: usize) -> Result<(), String> {
+    if let Err(e) = rayon::ThreadPoolBuilder::new().num_threads(num_threads).build_global() {
+        return Err(e.to_string());
+    }
+    Ok(())
 }
 
 
@@ -434,8 +542,24 @@ async fn start_download(
     target_dir: String,
     excluded_files: Vec<String>,
 ) -> Result<(), String> {
-    // Step 1: Scan local files and create a hash map
-    let local_files = scan_local_files(&target_dir);
+    // Step 1: Determine top-level directories and scan only those
+    let top_level_dirs: HashSet<String> = manifest.files.iter()
+        .filter_map(|file| {
+            Path::new(&file.relative_path).components().next().and_then(|comp| {
+                if let Component::Normal(dir) = comp {
+                    Some(dir.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+
+    let scan_dirs: Vec<PathBuf> = top_level_dirs.iter()
+        .map(|dir| Path::new(&target_dir).join(dir))
+        .collect();
+
+    let local_files = scan_local_files(&scan_dirs);
 
     let files_to_process = manifest.files.clone(); // Clone for modification
     let mut files_to_download = Vec::new();
@@ -496,7 +620,7 @@ async fn start_download(
                 match download_file(&window_clone, &file, &path).await {
                     Ok(_) => {
                         // After download, verify and unzip
-                        if let Err(e) = verify_and_unzip(&window_clone, &file, &path, &target_dir_clone) {
+                        if let Err(e) = verify_and_unzip(&window_clone, &file, &path, &target_dir_clone, &*excluded_files_clone) {
                             window_clone.emit("DOWNLOAD_ERROR", e.clone()).unwrap();
                             eprintln!("Verification/Unzip failed for {}: {}", file.name, e);
                             return; // Stop processing this file
@@ -565,22 +689,58 @@ fn verify_and_unzip(
     file_info: &ManifestFile,
     path: &std::path::Path,
     target_dir: &str,
+    excluded_files: &[String],
 ) -> Result<(), String> {
     // 1. Check if the file should be auto-extracted first.
     if (file_info.file_type == "zip" || file_info.file_type == "update_package")
         && file_info.auto_extract.unwrap_or(false)
     {
-        let file = File::open(path).map_err(|e| e.to_string())?;
-        let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
-        
-        // Always unzip into a subfolder named after the zip file.
         let zip_name = path.file_stem().unwrap_or_default().to_str().unwrap_or("archive");
         let unzip_target_path = std::path::Path::new(target_dir).join(zip_name);
 
+        if unzip_target_path.exists() {
+            let excluded_paths_set: HashSet<_> = excluded_files
+                .iter()
+                .map(|f| Path::new(target_dir).join(f))
+                .collect();
+
+            let mut excluded_parents = HashSet::new();
+            for excluded_path in &excluded_paths_set {
+                if excluded_path.starts_with(&unzip_target_path) {
+                    let mut current = excluded_path.parent();
+                    while let Some(parent) = current {
+                        excluded_parents.insert(parent.to_path_buf());
+                        if parent == unzip_target_path {
+                            break;
+                        }
+                        current = parent.parent();
+                    }
+                }
+            }
+
+            for entry in walkdir::WalkDir::new(&unzip_target_path).contents_first(true) {
+                if let Ok(entry) = entry {
+                    let current_path = entry.path();
+                    if current_path != unzip_target_path {
+                        if !excluded_paths_set.contains(current_path) && !excluded_parents.contains(current_path) {
+                            if entry.file_type().is_dir() {
+                                let _ = fs::remove_dir(current_path);
+                            } else {
+                                let _ = fs::remove_file(current_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         if !unzip_target_path.exists() {
             fs::create_dir_all(&unzip_target_path).map_err(|e| e.to_string())?;
         }
 
+        let file = File::open(path).map_err(|e| e.to_string())?;
+        let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
+        
         archive.extract(&unzip_target_path).map_err(|e| e.to_string())?;
 
         // After successful extraction, remove the original zip file.
@@ -636,6 +796,12 @@ fn save_exclusion_list(target_dir: String, excluded_files: Vec<String>) -> Resul
 
 fn main() {
     tauri::Builder::default()
+        .setup(|_app| {
+            // Initialize the thread pool on startup
+            // We don't have access to local storage here yet, so we'll rely on the frontend
+            // to call set_thread_pool on launch. The default is fine for the first run.
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_folder_contents, 
             save_file_dialog, 
@@ -643,23 +809,36 @@ fn main() {
             start_download,
             load_exclusion_list,
             save_exclusion_list,
-            calculate_diff
+            calculate_diff,
+            get_cpu_count,
+            set_thread_pool,
+            get_username,
+            fetch_news,
+            check_for_updates,
+            fetch_modpacks,
+            fetch_manifest_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-fn scan_local_files(target_dir: &str) -> HashMap<std::path::PathBuf, String> {
-    let mut map = HashMap::new();
-    let walker = walkdir::WalkDir::new(target_dir).into_iter();
-    for entry in walker.filter_map(Result::ok) {
-        if entry.file_type().is_file() {
-            if let Ok(hash) = calculate_file_hash(entry.path()) {
-                map.insert(entry.path().to_path_buf(), hash);
-            }
-        }
-    }
-    map
+fn scan_local_files(scan_dirs: &[PathBuf]) -> HashMap<std::path::PathBuf, String> {
+    scan_dirs.par_iter()
+        .filter(|dir| dir.exists() && dir.is_dir())
+        .flat_map(|dir| {
+            walkdir::WalkDir::new(dir).into_iter()
+                .filter_map(Result::ok)
+                .par_bridge() 
+                .filter(|entry| entry.file_type().is_file())
+                .filter_map(|entry| {
+                    if let Ok(hash) = calculate_file_hash(entry.path()) {
+                        Some((entry.path().to_path_buf(), hash))
+                    } else {
+                        None
+                    }
+                })
+        })
+        .collect()
 }
 
 fn cleanup_extra_files(target_dir: &str, manifest_files: &[ManifestFile], excluded_files: &[String]) {
@@ -673,21 +852,38 @@ fn cleanup_extra_files(target_dir: &str, manifest_files: &[ManifestFile], exclud
         .map(|f| std::path::Path::new(target_dir).join(f))
         .collect();
 
-    let walker = walkdir::WalkDir::new(target_dir).into_iter();
-    for entry in walker.filter_map(Result::ok) {
-        let path = entry.path();
-        // Don't touch the exclusion config file
-        if path.ends_with(".sync_exclude.json") {
-            continue;
-        }
+    let top_level_dirs: HashSet<String> = manifest_files.iter()
+        .filter_map(|file| {
+            Path::new(&file.relative_path).components().next().and_then(|comp| {
+                if let Component::Normal(dir) = comp {
+                    Some(dir.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
 
-        if !manifest_paths.contains(path) && !excluded_paths.contains(path) {
-            if path.is_file() {
-                let _ = fs::remove_file(path); // Ignore error if file is already gone
-            } else if path.is_dir() {
-                // Only remove empty dirs for safety
-                if fs::read_dir(path).map(|mut i| i.next().is_none()).unwrap_or(false) {
-                    let _ = fs::remove_dir(path);
+    for dir_name in top_level_dirs {
+        let dir_to_scan = Path::new(target_dir).join(dir_name);
+        if !dir_to_scan.exists() { continue; }
+
+        let walker = walkdir::WalkDir::new(dir_to_scan).into_iter();
+        for entry in walker.filter_map(Result::ok) {
+            let path = entry.path();
+            // Don't touch the exclusion config file
+            if path.ends_with(".sync_exclude.json") {
+                continue;
+            }
+
+            if !manifest_paths.contains(path) && !excluded_paths.contains(path) {
+                if path.is_file() {
+                    let _ = fs::remove_file(path); // Ignore error if file is already gone
+                } else if path.is_dir() {
+                    // Only remove empty dirs for safety
+                    if fs::read_dir(path).map(|mut i| i.next().is_none()).unwrap_or(false) {
+                        let _ = fs::remove_dir(path);
+                    }
                 }
             }
         }

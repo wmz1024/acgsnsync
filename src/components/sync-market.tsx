@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { SyncConfirmation } from './sync-confirmation';
+import { PlusCircle } from 'lucide-react';
+import { CustomSyncDialog } from './custom-sync-dialog';
+import { invoke } from '@tauri-apps/api';
 
 interface Modpack {
   name: string;
@@ -15,23 +17,23 @@ interface ModpackData {
   [key: string]: Modpack;
 }
 
-export function SyncMarket() {
+interface SyncMarketProps {
+    onSync: (url: string) => void;
+}
+
+export function SyncMarket({ onSync }: SyncMarketProps) {
   const [modpacks, setModpacks] = useState<ModpackData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedModpackUrl, setSelectedModpackUrl] = useState<string | null>(null);
+  const [isCustomSyncOpen, setIsCustomSyncOpen] = useState(false);
 
   useEffect(() => {
     const fetchModpacks = async () => {
       try {
-        const response = await fetch('https://aka.wmz1024.com/modpack.json');
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data: ModpackData = await response.json();
+        const data = await invoke<ModpackData>('fetch_modpacks');
         setModpacks(data);
       } catch (e: any) {
-        setError(e.message);
+        setError(e.toString());
     } finally {
       setIsLoading(false);
     }
@@ -39,18 +41,6 @@ export function SyncMarket() {
 
     fetchModpacks();
   }, []);
-
-  const handleSyncClick = (url: string) => {
-    setSelectedModpackUrl(url);
-  };
-
-  const handleBack = () => {
-    setSelectedModpackUrl(null);
-  }
-
-  if (selectedModpackUrl) {
-    return <SyncConfirmation manifestUrl={selectedModpackUrl} onBack={handleBack} />;
-  }
 
   if (isLoading) {
     return <div className="p-6">正在加载同步市场...</div>;
@@ -62,12 +52,27 @@ export function SyncMarket() {
 
   return (
     <div className="p-6 h-full overflow-auto">
-      <h2 className="text-2xl font-bold mb-4">同步市场</h2>
+        <div className="flex justify-between items-center mb-4">
+            <h2 className="text-2xl font-bold">同步市场</h2>
+            <Button onClick={() => setIsCustomSyncOpen(true)}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                同步自定义包
+            </Button>
+        </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {modpacks && Object.values(modpacks).map((pack) => (
           <Card key={pack.name}>
             <CardHeader>
-              <img src={pack.thumbnail} alt={pack.name} className="w-full h-32 object-cover rounded-t-lg" />
+              <img 
+                src={pack.thumbnail} 
+                alt={pack.name} 
+                className="w-full h-32 object-cover rounded-t-lg" 
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.onerror = null; // Prevent infinite loop if placeholder is also missing
+                  target.src = '/tauri.svg';
+                }}
+              />
               <CardTitle className="pt-4">{pack.name}</CardTitle>
               <CardDescription>作者: {pack.author}</CardDescription>
                 </CardHeader>
@@ -75,11 +80,16 @@ export function SyncMarket() {
               <p className="text-sm text-muted-foreground">{pack.description}</p>
                 </CardContent>
             <CardFooter>
-              <Button className="w-full" onClick={() => handleSyncClick(pack.url)}>同步</Button>
+              <Button className="w-full" onClick={() => onSync(pack.url)}>同步</Button>
             </CardFooter>
               </Card>
             ))}
       </div>
+      <CustomSyncDialog 
+        isOpen={isCustomSyncOpen}
+        onClose={() => setIsCustomSyncOpen(false)}
+        onSync={onSync}
+      />
     </div>
   );
 }

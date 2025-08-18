@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FolderOpen, Download, Trash2 } from "lucide-react";
 import { EnhancedFileItem } from "@/components/enhanced-file-item";
+import { Textarea } from "@/components/ui/textarea";
 
 interface FileItem {
   path: string;
@@ -23,7 +24,8 @@ export function ExportTab() {
   const [exportSettings, setExportSettings] = useState({
     packageName: "",
     downloadPrefix: "https://example.com/downloads/",
-    version: "1.0.0"
+    version: "1.0.0",
+    description: ""
   });
 
   const selectFolder = async () => {
@@ -243,6 +245,19 @@ export function ExportTab() {
                   }))}
                   className="w-full mt-1 px-3 py-2 border rounded-md"
                   placeholder="1.0.0"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">简介</label>
+                <Textarea
+                  value={exportSettings.description}
+                  onChange={(e) => setExportSettings(prev => ({
+                    ...prev,
+                    description: e.target.value
+                  }))}
+                  className="w-full mt-1"
+                  placeholder="输入简介内容..."
+                  rows={4}
                 />
               </div>
             </CardContent>

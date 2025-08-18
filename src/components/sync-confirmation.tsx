@@ -1,13 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from './ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
-import { open } from '@tauri-apps/api/dialog';
 import { invoke } from '@tauri-apps/api';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowLeft, AlertCircle, CheckCircle, XCircle, ArrowDown, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, AlertCircle, RefreshCw } from 'lucide-react';
 import { Progress } from './ui/progress';
-import { Checkbox } from './ui/checkbox';
 import { ScrollArea } from './ui/scroll-area';
+import { ExclusionEditor } from './exclusion-editor';
+import { FileTree, buildFileTree, FileStatus, DiffFile } from './file-tree';
+import { TargetDirectorySelector } from './target-directory-selector';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
 
 interface SyncConfirmationProps {
   manifestUrl: string;
@@ -18,6 +22,7 @@ interface Manifest {
   packageName?: string;
   package_name?: string;
   version: string;
+  description?: string;
   files: ManifestFile[];
 }
 
@@ -53,20 +58,8 @@ const getRelativePath = (file: ManifestFile): string | undefined => {
     return file.relativePath || file.relative_path;
 }
 
-enum FileStatus {
-    Unchanged = "Unchanged",
-    New = "New",
-    Modified = "Modified",
-    Extra = "Extra",
-    Excluded = "Excluded",
-    ForceUpdate = "ForceUpdate",
-}
-
-interface DiffFile {
-    path: string;
-    status: FileStatus;
-}
-
+export { FileStatus };
+export type { DiffFile };
 
 const getPackageName = (manifest: Manifest): string | undefined => {
     return manifest.packageName || manifest.package_name;
@@ -80,18 +73,19 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
   const [targetDir, setTargetDir] = useState<string | null>(null);
   const [excludedFiles, setExcludedFiles] = useState<string[]>([]);
   const [fileDiff, setFileDiff] = useState<DiffFile[]>([]);
+  const [isCalculatingDiff, setIsCalculatingDiff] = useState(false);
   const [overallProgress, setOverallProgress] = useState(0);
   const [fileProgress, setFileProgress] = useState<DownloadProgress | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isExclusionEditorOpen, setIsExclusionEditorOpen] = useState(false);
+
+  const fileTree = useMemo(() => buildFileTree(fileDiff), [fileDiff]);
 
   useEffect(() => {
     const fetchManifest = async () => {
       try {
-        const response = await fetch(manifestUrl);
-        if (!response.ok) {
-          throw new Error(`清单文件获取失败: ${response.status} ${response.statusText}`);
-        }
-        const text = await response.text();
+        const text = await invoke<string>('fetch_manifest_text', { url: manifestUrl });
+
         try {
           const data: Manifest = JSON.parse(text);
           if (!getPackageName(data)) {
@@ -149,6 +143,7 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
             return;
         }
 
+        setIsCalculatingDiff(true);
         try {
             const diffResult: DiffFile[] = await invoke('calculate_diff', {
                 manifest,
@@ -158,36 +153,23 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
             setFileDiff(diffResult);
         } catch (e: any) {
             setError(`Failed to calculate diff: ${e.toString()}`);
+        } finally {
+            setIsCalculatingDiff(false);
         }
     };
     calculateDiff();
   }, [targetDir, manifest, excludedFiles]);
 
 
-  const handleSelectDir = async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: '选择同步目录',
-    });
-    if (typeof selected === 'string') {
-      setTargetDir(selected);
-      try {
-        const list: string[] = await invoke('load_exclusion_list', { targetDir: selected });
-        setExcludedFiles(list);
-      } catch (e) {
-        console.error("Failed to load exclusion list:", e);
-        // Handle error, maybe show a toast
-      }
+  const handleDirectorySelected = async (path: string) => {
+    setTargetDir(path);
+    try {
+      const list: string[] = await invoke('load_exclusion_list', { targetDir: path });
+      setExcludedFiles(list);
+    } catch (e) {
+      console.error("Failed to load exclusion list:", e);
+      // Handle error, maybe show a toast
     }
-  };
-
-  const handleToggleFileSelection = (relativePath: string) => {
-    setExcludedFiles(prev => 
-      prev.includes(relativePath)
-        ? prev.filter(p => p !== relativePath)
-        : [...prev, relativePath]
-    );
   };
 
   const handleStartSync = async () => {
@@ -237,72 +219,51 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
          </Button>
          <h2 className="text-2xl font-bold ml-2">同步确认: {getPackageName(manifest)}</h2>
        </div>
-       
-       <Card>
-         <CardHeader>
-           <CardTitle>选择同步目录</CardTitle>
-         </CardHeader>
-         <CardContent>
-           <div className="flex items-center space-x-4">
-             <Button onClick={handleSelectDir}>选择目录</Button>
-             <div className="text-sm p-2 bg-muted rounded-md flex-grow">
-               {targetDir ? `将同步到: ${targetDir}` : '请选择一个目录'}
-             </div>
-           </div>
-         </CardContent>
-       </Card>
- 
-       <div className="flex-grow mt-4 overflow-auto">
-         <h3 className="text-lg font-semibold mb-2">同步计划</h3>
-         <ScrollArea className="h-64 border rounded-md">
-            <div className="p-4 space-y-2">
-                {fileDiff.map((file, index) => {
-                    const isExcluded = file.status === FileStatus.Excluded;
-                    let Icon = AlertTriangle;
-                    let textClass = "";
-                    let description = "";
 
-                    switch (file.status) {
-                        case FileStatus.New:
-                            Icon = ArrowDown; textClass = "text-green-600"; description = "新增";
-                            break;
-                        case FileStatus.Modified:
-                            Icon = RefreshCw; textClass = "text-blue-600"; description = "更新";
-                            break;
-                        case FileStatus.ForceUpdate:
-                            Icon = RefreshCw; textClass = "text-orange-600"; description = "强制更新 (压缩包)";
-                            break;
-                        case FileStatus.Extra:
-                            Icon = XCircle; textClass = "text-red-600"; description = "删除";
-                            break;
-                        case FileStatus.Unchanged:
-                            Icon = CheckCircle; textClass = "text-gray-500"; description = "不变";
-                            break;
-                        case FileStatus.Excluded:
-                            Icon = XCircle; textClass = "text-gray-500 line-through"; description = "排除";
-                            break;
-                    }
-                    
-                    return (
-                        <div key={`${file.path}-${index}`} className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted">
-                            <Checkbox
-                                id={file.path}
-                                checked={!isExcluded}
-                                onCheckedChange={() => handleToggleFileSelection(file.path)}
-                            />
-                            <Icon className={`w-4 h-4 ${textClass}`} />
-                            <label htmlFor={file.path} className={`text-sm cursor-pointer flex-grow ${textClass}`}>
-                                {file.path}
-                            </label>
-                            <span className={`text-xs px-2 py-1 rounded-full ${textClass}`}>{description}</span>
-                        </div>
-                    );
-                })}
-            </div>
+      {manifest.description && (
+        <Card className="mb-4">
+            <CardHeader>
+                <CardTitle>简介</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <div className="prose dark:prose-invert max-w-none text-sm text-muted-foreground">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {manifest.description}
+                    </ReactMarkdown>
+                </div>
+            </CardContent>
+        </Card>
+      )}
+       
+      <TargetDirectorySelector onDirectorySelect={handleDirectorySelected} disabled={isCalculatingDiff || isDownloading} />
+
+       <div className="flex-grow mt-4 overflow-auto">
+         <h3 className="text-lg font-semibold mb-2">
+            {targetDir ? `同步计划: ${targetDir}` : '同步计划'}
+         </h3>
+         <ScrollArea className="h-64 border rounded-md">
+            {isCalculatingDiff ? (
+              <div className="flex items-center justify-center h-full">
+                <RefreshCw className="w-6 h-6 animate-spin mr-2" />
+                正在计算文件差异...
+              </div>
+            ) : (
+                <div className="p-4">
+                    <FileTree nodes={fileTree} />
+                </div>
+            )}
          </ScrollArea>
        </div>
  
        <div className="mt-4">
+        <Button
+            variant="outline"
+            className="w-full mb-2"
+            onClick={() => setIsExclusionEditorOpen(true)}
+            disabled={!targetDir || isCalculatingDiff}
+        >
+            管理排除列表
+        </Button>
          {isDownloading ? (
            <div className="space-y-2">
              <Progress value={overallProgress} />
@@ -314,9 +275,16 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
              )}
            </div>
          ) : (
-           <Button className="w-full" disabled={!targetDir} onClick={handleStartSync}>开始同步</Button>
+           <Button className="w-full" disabled={!targetDir || isCalculatingDiff} onClick={handleStartSync}>开始同步</Button>
          )}
        </div>
+      <ExclusionEditor
+        isOpen={isExclusionEditorOpen}
+        onClose={() => setIsExclusionEditorOpen(false)}
+        targetDir={targetDir || ''}
+        initialExcludedFiles={excludedFiles}
+        onExclusionChange={setExcludedFiles}
+      />
      </div>
   );
 }

@@ -1,6 +1,5 @@
+import { Folder, File, Archive, Package } from 'lucide-react';
 import { Checkbox } from "@/components/ui/checkbox";
-import { Button } from "@/components/ui/button";
-import { File, Folder, Archive, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface FileItem {
@@ -109,9 +108,6 @@ export function FileBrowser({
                   )}
                 </div>
               )}
-              
-              {/* 调试信息 */}
-              {console.log(`File: ${file.name}, isDirectory: ${file.isDirectory}, selected: ${file.selected}, compress: ${file.compress}`)}
             </div>
             
             <div className="text-sm text-muted-foreground truncate">

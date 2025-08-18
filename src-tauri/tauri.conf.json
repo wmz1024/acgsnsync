@@ -6,8 +6,8 @@
     "distDir": "../dist"
   },
   "package": {
-    "productName": "Aero25x Template",
-    "version": "0.0.0"
+    "productName": "ACGStation Sync",
+    "version": "1.0.1"
   },
   "tauri": {
     "allowlist": {
@@ -43,18 +43,18 @@
     },
     "windows": [
       {
-        "title": "Aero25x Template",
-        "width": 800,
-        "height": 600
+        "title": "ACGStation Sync",
+        "width": 1000,
+        "height": 800
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' https://file.mingze.de"
+      "csp": "default-src 'self'; img-src 'self' https://file.iscar.net"
     },
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.aero25x.dev",
+      "identifier": "com.acgstation.sync",
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",

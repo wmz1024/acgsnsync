@@ -36,7 +36,7 @@ export function ExportTab() {
     packageName: "ACGStation-",
     downloadPrefix: "https://file.iscar.net/d/mzclink-cn/acgsn/",
     version: "1.0.0",
-    description: "# ACGStation - 包名（允许使用markdown）",
+    description: "# ACGStation - 包名（允许使用markdown）\n\n使用的基础客户端: Java【版本】+Forge【最新版】+Minecraft【版本】\n\n使用教程：请选中对应的.minecraft/versions/对应的游戏文件",
     disableHashCheck: false,
     disableSizeCheck: false,
   });

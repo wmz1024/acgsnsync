@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from 'lucide-react';
-import { CustomSyncDialog } from './custom-sync-dialog';
+import { CustomSyncImporter } from './custom-sync-importer';
 import { invoke } from '@tauri-apps/api';
 import { ProxiedImage } from './proxied-image';
 
@@ -19,7 +19,7 @@ interface ModpackData {
 }
 
 interface SyncMarketProps {
-    onSync: (url: string) => void;
+    onSync: (url: string, localPackagePath?: string, useLocalFiles?: boolean) => void;
 }
 
 export function SyncMarket({ onSync }: SyncMarketProps) {
@@ -81,7 +81,7 @@ export function SyncMarket({ onSync }: SyncMarketProps) {
               </Card>
             ))}
       </div>
-      <CustomSyncDialog 
+      <CustomSyncImporter 
         isOpen={isCustomSyncOpen}
         onClose={() => setIsCustomSyncOpen(false)}
         onSync={onSync}

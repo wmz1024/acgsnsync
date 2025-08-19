@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use rayon::prelude::*;
 use base64::{engine::general_purpose, Engine as _};
+use std::io::Read;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NewsItem {
@@ -588,6 +589,79 @@ async fn proxy_fetch_image(url: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn read_manifest_from_zip(zip_path: String) -> Result<String, String> {
+    let file = File::open(zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut manifest_file = archive.by_name("manifest.json").map_err(|e| e.to_string())?;
+    
+    let mut contents = String::new();
+    manifest_file.read_to_string(&mut contents).map_err(|e| e.to_string())?;
+    
+    Ok(contents)
+}
+
+#[tauri::command]
+async fn sync_from_local_package(
+    window: Window,
+    zip_path: String,
+    target_dir: String,
+    excluded_files: Vec<String>,
+) -> Result<(), String> {
+    let manifest_str = read_manifest_from_zip(zip_path.clone())?;
+    let manifest: Manifest = serde_json::from_str(&manifest_str).map_err(|e| e.to_string())?;
+    
+    let local_files = scan_local_files(&get_scan_dirs(&manifest, &target_dir));
+
+    let files_to_process = manifest.files.clone();
+    let mut files_to_install = Vec::new();
+
+    for file in files_to_process {
+         let local_path = Path::new(&target_dir).join(&file.relative_path);
+        if !local_path.exists() {
+            files_to_install.push(file);
+        }
+    }
+
+    let total_files = files_to_install.len();
+    if total_files == 0 {
+        cleanup_extra_files(&target_dir, &manifest.files, &excluded_files);
+        window.emit("OVERALL_PROGRESS", 100.0).unwrap();
+        return Ok(());
+    }
+    
+    let completed_files = Arc::new(Mutex::new(0));
+    let manifest_files_arc = Arc::new(manifest.files.clone());
+    let excluded_files_arc = Arc::new(excluded_files);
+
+    tokio::task::spawn_blocking(move || {
+        let zip_file = File::open(zip_path).unwrap();
+        let mut archive = zip::ZipArchive::new(zip_file).unwrap();
+
+        for file_to_install in files_to_install {
+            let target_path = Path::new(&target_dir).join(&file_to_install.relative_path);
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+
+            let mut zip_file_entry = archive.by_name(&file_to_install.relative_path).unwrap();
+            let mut dest_file = File::create(&target_path).unwrap();
+            std::io::copy(&mut zip_file_entry, &mut dest_file).unwrap();
+
+            let mut completed_count = completed_files.lock().unwrap();
+            *completed_count += 1;
+            
+            let progress = (*completed_count as f32 / total_files as f32) * 100.0;
+            window.emit("OVERALL_PROGRESS", progress).unwrap();
+            window.emit("DOWNLOAD_SUCCESS", &file_to_install.name).unwrap();
+        }
+
+        cleanup_extra_files(&target_dir, &manifest_files_arc, &excluded_files_arc);
+    }).await.map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn fetch_manifest_text(url: String) -> Result<String, String> {
     reqwest::get(&url)
         .await
@@ -933,10 +1007,30 @@ fn main() {
             check_for_updates,
             fetch_modpacks,
             fetch_manifest_text,
-            proxy_fetch_image
+            proxy_fetch_image,
+            read_manifest_from_zip,
+            sync_from_local_package
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn get_scan_dirs(manifest: &Manifest, target_dir: &str) -> Vec<PathBuf> {
+    let top_level_dirs: HashSet<String> = manifest.files.iter()
+        .filter_map(|file| {
+            Path::new(&file.relative_path).components().next().and_then(|comp| {
+                if let Component::Normal(dir) = comp {
+                    Some(dir.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+    
+    top_level_dirs.iter()
+        .map(|dir| Path::new(target_dir).join(dir))
+        .collect()
 }
 
 fn scan_local_files(scan_dirs: &[PathBuf]) -> HashMap<std::path::PathBuf, String> {

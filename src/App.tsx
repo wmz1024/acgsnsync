@@ -14,6 +14,12 @@ import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api";
 import { Logo } from "@/components/logo";
 
+interface SyncOptions {
+    manifestUrl: string;
+    localPackagePath?: string;
+    useLocalFiles?: boolean;
+}
+
 const THREAD_COUNT_KEY = 'sync_thread_count';
 const CURRENT_VERSION = '1.1.0'; // This should be updated by the developer for each release
 
@@ -25,7 +31,7 @@ interface UpdateInfo {
 export const App = () => {
   const [activeTab, setActiveTab] = useState("home");
   const [view, setView] = useState<'market' | 'confirmation'>('market');
-  const [manifestUrl, setManifestUrl] = useState<string | null>(null);
+  const [syncOptions, setSyncOptions] = useState<SyncOptions | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
@@ -56,14 +62,14 @@ export const App = () => {
     checkForUpdates();
   }, []);
 
-  const handleSync = (url: string) => {
-    setManifestUrl(url);
+  const handleSync = (url: string, localPackagePath?: string, useLocalFiles?: boolean) => {
+    setSyncOptions({ manifestUrl: url, localPackagePath, useLocalFiles });
     setView('confirmation');
   };
 
   const handleBack = () => {
     setView('market');
-    setManifestUrl(null);
+    setSyncOptions(null);
   };
   
   const sidebarItems = [
@@ -97,8 +103,8 @@ export const App = () => {
       case "export":
         return <ExportTab />;
       case "sync_market":
-        if (view === 'confirmation' && manifestUrl) {
-            return <SyncConfirmation manifestUrl={manifestUrl} onBack={handleBack} />;
+        if (view === 'confirmation' && syncOptions) {
+            return <SyncConfirmation syncOptions={syncOptions} onBack={handleBack} />;
         }
         return <SyncMarket onSync={handleSync} />;
       default:

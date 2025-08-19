@@ -18,8 +18,14 @@ interface SyncLog {
     message: string;
 }
 
+interface SyncOptions {
+    manifestUrl: string;
+    localPackagePath?: string;
+    useLocalFiles?: boolean;
+}
+
 interface SyncConfirmationProps {
-  manifestUrl: string;
+  syncOptions: SyncOptions;
   onBack: () => void;
 }
 
@@ -73,7 +79,7 @@ const getPackageName = (manifest: Manifest): string | undefined => {
 }
 
 
-export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps) {
+export function SyncConfirmation({ syncOptions, onBack }: SyncConfirmationProps) {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +100,14 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
   useEffect(() => {
     const fetchManifest = async () => {
       try {
-        const text = await invoke<string>('fetch_manifest_text', { url: manifestUrl });
+        let text;
+        if (syncOptions.localPackagePath && syncOptions.useLocalFiles) {
+            text = await invoke<string>('read_manifest_from_zip', { zipPath: syncOptions.localPackagePath });
+        } else if (syncOptions.localPackagePath) {
+             text = await invoke<string>('read_manifest_from_zip', { zipPath: syncOptions.localPackagePath });
+        } else {
+            text = await invoke<string>('fetch_manifest_text', { url: syncOptions.manifestUrl });
+        }
 
         try {
           const data: Manifest = JSON.parse(text);
@@ -154,7 +167,7 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
       if (unlistenSuccess) unlistenSuccess();
       if (unlistenError) unlistenError();
     };
-  }, [manifestUrl]);
+  }, [syncOptions]);
 
   useEffect(() => {
     const calculateDiff = async () => {
@@ -205,14 +218,21 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
       // Save the exclusion list before starting the download
       await invoke('save_exclusion_list', { targetDir, excludedFiles });
 
-      // Pass the manifest data directly to the backend
-      await invoke('start_download', {
-        manifest,
-        targetDir,
-        excludedFiles,
-        overrideDisableHashCheck,
-        overrideDisableSizeCheck,
-      });
+      if (syncOptions.localPackagePath && syncOptions.useLocalFiles) {
+          await invoke('sync_from_local_package', {
+            zipPath: syncOptions.localPackagePath,
+            targetDir,
+            excludedFiles,
+          });
+      } else {
+        await invoke('start_download', {
+          manifest,
+          targetDir,
+          excludedFiles,
+          overrideDisableHashCheck,
+          overrideDisableSizeCheck,
+        });
+      }
     } catch (e: any) {
       setError(`下载启动失败: ${e.toString()}`);
       setIsDownloading(false);

@@ -17,8 +17,12 @@
         "open": true
       },
       "dialog": {
-        "all": false,
-        "open": true
+        "all": true,
+        "ask": true,
+        "confirm": true,
+        "message": true,
+        "open": true,
+        "save": true
       },
       "fs": {
         "all": false,

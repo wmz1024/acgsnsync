@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
-import { open, message } from "@tauri-apps/api/dialog";
+import { open, message, save } from "@tauri-apps/api/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FolderOpen, Download, Trash2 } from "lucide-react";
 import { EnhancedFileItem } from "@/components/enhanced-file-item";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
+import { listen } from "@tauri-apps/api/event";
 
 interface FileItem {
   path: string;
@@ -19,10 +21,17 @@ interface FileItem {
   exclusions?: string[];
 }
 
+interface ExportProgress {
+    total: number;
+    current: number;
+    fileName: string;
+}
+
 export function ExportTab() {
   const [selectedFolder, setSelectedFolder] = useState<string>("");
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportSettings, setExportSettings] = useState({
     packageName: "",
     downloadPrefix: "https://example.com/downloads/",
@@ -31,6 +40,22 @@ export function ExportTab() {
     disableHashCheck: false,
     disableSizeCheck: false,
   });
+
+  useEffect(() => {
+    let unlisten: () => void;
+    
+    const setupListener = async () => {
+        unlisten = await listen<ExportProgress>('EXPORT_PROGRESS', (event) => {
+            setExportProgress(event.payload);
+        });
+    };
+
+    setupListener();
+
+    return () => {
+        if (unlisten) unlisten();
+    };
+  }, []);
 
   const selectFolder = async () => {
     try {
@@ -107,19 +132,16 @@ export function ExportTab() {
       return;
     }
 
+    const savePath = await save({
+      defaultPath: `${exportSettings.packageName || "export"}.zip`,
+      filters: [{ name: 'Zip Archive', extensions: ['zip'] }]
+    });
+
+    if (!savePath) return;
+
     setIsLoading(true);
+    setExportProgress({ total: selectedFiles.length, current: 0, fileName: 'Starting...' });
     try {
-      // 获取保存路径（当前使用桌面默认路径）
-      const savePath = await invoke("save_file_dialog", {
-        defaultName: `${exportSettings.packageName || "export"}.zip`
-      });
-
-      if (!savePath) {
-        await message("获取保存路径失败", { title: "错误", type: "error" });
-        setIsLoading(false);
-        return;
-      }
-
       // 执行导出
       const result = await invoke("export_files", {
         files: selectedFiles,
@@ -133,6 +155,7 @@ export function ExportTab() {
       await message(`导出失败: ${error}`, { title: "错误", type: "error" });
     } finally {
       setIsLoading(false);
+      setExportProgress(null);
     }
   };
 
@@ -297,15 +320,24 @@ export function ExportTab() {
           {/* 导出按钮 */}
           <Card>
             <CardContent className="pt-6">
-              <Button 
-                onClick={exportFiles} 
-                disabled={isLoading || selectedCount === 0}
-                className="w-full"
-                size="lg"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                {isLoading ? "导出中..." : `导出选中的 ${selectedCount} 个项目`}
-              </Button>
+                {isLoading && exportProgress ? (
+                    <div className="space-y-2">
+                        <Progress value={(exportProgress.current / exportProgress.total) * 100} />
+                        <div className="text-xs text-center text-muted-foreground">
+                            ({exportProgress.current}/{exportProgress.total}) 正在处理: {exportProgress.fileName}
+                        </div>
+                    </div>
+                ) : (
+                    <Button 
+                        onClick={exportFiles} 
+                        disabled={isLoading || selectedCount === 0}
+                        className="w-full"
+                        size="lg"
+                    >
+                        <Download className="h-4 w-4 mr-2" />
+                        {`导出选中的 ${selectedCount} 个项目`}
+                    </Button>
+                )}
             </CardContent>
           </Card>
         </div>

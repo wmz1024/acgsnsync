@@ -94,6 +94,13 @@ struct ExportManifest {
 }
 
 #[derive(Clone, serde::Serialize)]
+struct ExportProgress {
+    total: usize,
+    current: usize,
+    file_name: String,
+}
+
+#[derive(Clone, serde::Serialize)]
 struct DownloadProgress {
     file: String,
     total: u64,
@@ -301,7 +308,12 @@ fn add_file_to_zip<W: Write + std::io::Seek>(
 }
 
 #[tauri::command]
-async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_str: String) -> Result<String, String> {
+async fn export_files(
+    window: Window,
+    files: Vec<FileItem>,
+    settings: ExportSettings,
+    save_path_str: String
+) -> Result<String, String> {
     if files.is_empty() {
         return Err("No files selected for export".to_string());
     }
@@ -315,6 +327,9 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
     let mut zip = ZipWriter::new(zip_file);
     let mut exported_files = Vec::new();
     
+    let total_files_to_process = files.iter().filter(|f| f.selected).count();
+    let mut processed_files = 0;
+
     // 获取基础路径（第一个文件的父目录）
     let first_file_path = Path::new(&files[0].path);
     let base_path = if first_file_path.is_file() {
@@ -334,6 +349,13 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
 
     for file_item in files.iter().filter(|f| f.selected) {
         let file_path = Path::new(&file_item.path);
+        
+        processed_files += 1;
+        window.emit("EXPORT_PROGRESS", &ExportProgress {
+            total: total_files_to_process,
+            current: processed_files,
+            file_name: file_item.name.clone(),
+        }).unwrap();
         
         if file_item.is_directory {
             // 处理文件夹

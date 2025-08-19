@@ -185,13 +185,13 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
 
   const handleDirectorySelected = async (path: string) => {
     setTargetDir(path);
-    try {
+      try {
       const list: string[] = await invoke('load_exclusion_list', { targetDir: path });
-      setExcludedFiles(list);
-    } catch (e) {
-      console.error("Failed to load exclusion list:", e);
-      // Handle error, maybe show a toast
-    }
+        setExcludedFiles(list);
+      } catch (e) {
+        console.error("Failed to load exclusion list:", e);
+        // Handle error, maybe show a toast
+      }
   };
 
   const handleStartSync = async () => {
@@ -244,13 +244,13 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
          </Button>
          <h2 className="text-2xl font-bold ml-2">同步确认: {getPackageName(manifest)}</h2>
        </div>
-
+       
       {manifest.description && (
         <Card className="mb-4">
-            <CardHeader>
+         <CardHeader>
                 <CardTitle>简介</CardTitle>
-            </CardHeader>
-            <CardContent>
+         </CardHeader>
+         <CardContent>
                 <div className="prose dark:prose-invert max-w-none text-sm text-muted-foreground">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {manifest.description}
@@ -277,7 +277,7 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
                     <label htmlFor="override-disable-hash-check" className="text-sm font-medium">
                         禁用哈希校验 (覆盖清单设置)
                     </label>
-                </div>
+             </div>
                 <div className="flex items-center space-x-2">
                     <Checkbox
                         id="override-disable-size-check"
@@ -288,10 +288,10 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
                     <label htmlFor="override-disable-size-check" className="text-sm font-medium">
                         禁用大小校验 (覆盖清单设置)
                     </label>
-                </div>
-            </CardContent>
-        </Card>
-
+           </div>
+         </CardContent>
+       </Card>
+ 
        <div className="flex-grow mt-4 overflow-auto">
          <h3 className="text-lg font-semibold mb-2">
             {targetDir ? `同步计划: ${targetDir}` : '同步计划'}
@@ -301,11 +301,11 @@ export function SyncConfirmation({ manifestUrl, onBack }: SyncConfirmationProps)
               <div className="flex items-center justify-center h-full">
                 <RefreshCw className="w-6 h-6 animate-spin mr-2" />
                 正在计算文件差异...
-              </div>
+                        </div>
             ) : (
                 <div className="p-4">
                     <FileTree nodes={fileTree} />
-                </div>
+            </div>
             )}
          </ScrollArea>
        </div>

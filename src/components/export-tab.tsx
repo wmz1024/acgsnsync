@@ -16,6 +16,7 @@ interface FileItem {
   selected: boolean;
   compress?: boolean; // 是否压缩该文件夹
   isUpdatePackage?: boolean; // 是否为压缩包更新（减少服务器请求）
+  exclusions?: string[];
 }
 
 export function ExportTab() {
@@ -81,6 +82,12 @@ export function ExportTab() {
   const toggleUpdatePackage = (path: string, checked: boolean) => {
     setFiles(files.map(file => 
       file.path === path ? { ...file, isUpdatePackage: checked } : file
+    ));
+  };
+
+  const updateExclusions = (path: string, exclusions: string[]) => {
+    setFiles(files.map(file => 
+      file.path === path ? { ...file, exclusions } : file
     ));
   };
 
@@ -166,6 +173,7 @@ export function ExportTab() {
                   onToggleSelection={toggleSelection}
                   onToggleCompression={toggleCompression}
                   onToggleUpdatePackage={toggleUpdatePackage}
+                  onUpdateExclusions={updateExclusions}
                 />
               ))}
             </div>

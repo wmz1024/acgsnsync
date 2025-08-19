@@ -50,6 +50,7 @@ struct FileItem {
     compress: Option<bool>,
     #[serde(rename = "isUpdatePackage")]
     is_update_package: Option<bool>, // 是否为压缩包更新（减少服务器请求）
+    exclusions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -162,6 +163,7 @@ async fn get_folder_contents(path: String) -> Result<Vec<FileItem>, String> {
                             selected: false,
                             compress: Some(false),
                             is_update_package: Some(false),
+                            exclusions: None,
                         });
                     }
                     Err(e) => eprintln!("Error reading entry: {}", e),
@@ -206,12 +208,17 @@ fn add_directory_to_zip<W: Write + std::io::Seek>(
     base_path: &Path,
     should_compress: bool,
     disable_hash_check: bool,
+    excluded_paths: &HashSet<String>,
 ) -> Result<Vec<ExportedFile>, String> {
     let mut exported_files = Vec::new();
     
     for entry in WalkDir::new(dir_path) {
         let entry = entry.map_err(|e| format!("Error walking directory: {}", e))?;
         let path = entry.path();
+
+        if excluded_paths.contains(path.to_string_lossy().as_ref()) {
+            continue;
+        }
         
         if path.is_file() {
             let relative_path = path.strip_prefix(base_path)
@@ -317,6 +324,13 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
     };
     
     let disable_hash_check = settings.disable_hash_check.unwrap_or(false);
+    
+    let base_path_for_exclusions = Path::new(&files.iter().find(|f| f.selected).unwrap().path).parent().unwrap();
+    let excluded_paths: HashSet<String> = files.iter()
+        .filter(|f| f.selected && f.exclusions.is_some())
+        .flat_map(|f| f.exclusions.as_ref().unwrap().clone())
+        .map(|p| base_path_for_exclusions.join(p).to_string_lossy().into_owned())
+        .collect();
 
     for file_item in files.iter().filter(|f| f.selected) {
         let file_path = Path::new(&file_item.path);
@@ -335,7 +349,7 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
                     .map_err(|e| format!("Failed to create temp zip: {}", e))?;
                 
                 let mut temp_zip = ZipWriter::new(temp_zip_file);
-                let _folder_files = add_directory_to_zip(&mut temp_zip, file_path, file_path, true, disable_hash_check)?;
+                let _folder_files = add_directory_to_zip(&mut temp_zip, file_path, file_path, true, disable_hash_check, &excluded_paths)?;
                 temp_zip.finish().map_err(|e| format!("Failed to finish temp zip: {}", e))?;
                 
                 // 将子zip添加到主zip
@@ -375,7 +389,7 @@ async fn export_files(files: Vec<FileItem>, settings: ExportSettings, save_path_
                 let _ = fs::remove_file(&temp_zip_path);
             } else {
                 // 直接添加文件夹内容
-                let folder_files = add_directory_to_zip(&mut zip, file_path, base_path, false, disable_hash_check)?;
+                let folder_files = add_directory_to_zip(&mut zip, file_path, base_path, false, disable_hash_check, &excluded_paths)?;
                 exported_files.extend(folder_files);
             }
         } else {
@@ -451,17 +465,17 @@ fn calculate_diff(
 
     let manifest_diff: Vec<DiffFile> = manifest.files.par_iter()
         .map(|file| {
-            let path_str = file.relative_path.clone();
-            if excluded_set.contains(&path_str) {
+        let path_str = file.relative_path.clone();
+        if excluded_set.contains(&path_str) {
                 return DiffFile { path: path_str, status: FileStatus::Excluded };
-            }
+        }
 
-            if file.file_type == "zip" || file.file_type == "update_package" {
+        if file.file_type == "zip" || file.file_type == "update_package" {
                 return DiffFile { path: path_str, status: FileStatus::ForceUpdate };
-            }
+        }
 
-            let local_path = std::path::Path::new(&target_dir).join(&path_str);
-            match local_files.get(&local_path) {
+        let local_path = std::path::Path::new(&target_dir).join(&path_str);
+        match local_files.get(&local_path) {
                 Some(local_hash) if !disable_hash_check && local_hash == &file.hash => {
                     DiffFile { path: path_str, status: FileStatus::Unchanged }
                 }
@@ -481,11 +495,11 @@ fn calculate_diff(
                     }
                     // A check failed
                     DiffFile { path: path_str, status: FileStatus::Modified }
-                }
-                None => {
-                    DiffFile { path: path_str, status: FileStatus::New }
-                }
             }
+            None => {
+                    DiffFile { path: path_str, status: FileStatus::New }
+            }
+        }
         })
         .collect();
 
@@ -497,13 +511,13 @@ fn calculate_diff(
     let extra_files: Vec<DiffFile> = local_files.par_iter()
         .filter_map(|(local_path, _)| {
             if !manifest_paths.contains(local_path) {
-                if let Ok(rel_path) = local_path.strip_prefix(&target_dir) {
+             if let Ok(rel_path) = local_path.strip_prefix(&target_dir) {
                     let rel_path_str = rel_path.to_string_lossy().replace('\\', "/");
-                    if !excluded_set.contains(&rel_path_str) {
+                if !excluded_set.contains(&rel_path_str) {
                         return Some(DiffFile { path: rel_path_str, status: FileStatus::Extra });
-                    }
                 }
             }
+        }
             None
         })
         .collect();
@@ -790,14 +804,14 @@ fn verify_and_unzip(
                 }
             }
         }
-        
+
         if !unzip_target_path.exists() {
             fs::create_dir_all(&unzip_target_path).map_err(|e| e.to_string())?;
         }
 
         let file = File::open(path).map_err(|e| e.to_string())?;
         let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
-        
+
         archive.extract(&unzip_target_path).map_err(|e| e.to_string())?;
 
         // After successful extraction, remove the original zip file.
@@ -893,11 +907,11 @@ fn scan_local_files(scan_dirs: &[PathBuf]) -> HashMap<std::path::PathBuf, String
                 .par_bridge() 
                 .filter(|entry| entry.file_type().is_file())
                 .filter_map(|entry| {
-                    if let Ok(hash) = calculate_file_hash(entry.path()) {
+            if let Ok(hash) = calculate_file_hash(entry.path()) {
                         Some((entry.path().to_path_buf(), hash))
                     } else {
                         None
-                    }
+            }
                 })
         })
         .collect()
@@ -931,20 +945,20 @@ fn cleanup_extra_files(target_dir: &str, manifest_files: &[ManifestFile], exclud
         if !dir_to_scan.exists() { continue; }
 
         let walker = walkdir::WalkDir::new(dir_to_scan).into_iter();
-        for entry in walker.filter_map(Result::ok) {
-            let path = entry.path();
-            // Don't touch the exclusion config file
-            if path.ends_with(".sync_exclude.json") {
-                continue;
-            }
+    for entry in walker.filter_map(Result::ok) {
+        let path = entry.path();
+        // Don't touch the exclusion config file
+        if path.ends_with(".sync_exclude.json") {
+            continue;
+        }
 
-            if !manifest_paths.contains(path) && !excluded_paths.contains(path) {
-                if path.is_file() {
-                    let _ = fs::remove_file(path); // Ignore error if file is already gone
-                } else if path.is_dir() {
-                    // Only remove empty dirs for safety
-                    if fs::read_dir(path).map(|mut i| i.next().is_none()).unwrap_or(false) {
-                        let _ = fs::remove_dir(path);
+        if !manifest_paths.contains(path) && !excluded_paths.contains(path) {
+            if path.is_file() {
+                let _ = fs::remove_file(path); // Ignore error if file is already gone
+            } else if path.is_dir() {
+                // Only remove empty dirs for safety
+                if fs::read_dir(path).map(|mut i| i.next().is_none()).unwrap_or(false) {
+                    let _ = fs::remove_dir(path);
                     }
                 }
             }

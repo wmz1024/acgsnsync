@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { Checkbox } from "@/components/ui/checkbox";
-import { Folder, Archive, Package } from "lucide-react";
+import { Folder, Archive, Package, Settings } from "lucide-react";
+import { Button } from '@/components/ui/button';
+import { ExclusionManagerDialog } from './exclusion-manager-dialog';
 
 interface FileItem {
   path: string;
@@ -9,6 +12,7 @@ interface FileItem {
   selected: boolean;
   compress?: boolean;
   isUpdatePackage?: boolean;
+  exclusions?: string[];
 }
 
 interface EnhancedFileItemProps {
@@ -16,14 +20,18 @@ interface EnhancedFileItemProps {
   onToggleSelection: (path: string, checked: boolean) => void;
   onToggleCompression: (path: string, checked: boolean) => void;
   onToggleUpdatePackage: (path: string, checked: boolean) => void;
+  onUpdateExclusions: (path: string, exclusions: string[]) => void;
 }
 
 export function EnhancedFileItem({ 
   file, 
   onToggleSelection, 
   onToggleCompression, 
-  onToggleUpdatePackage 
+  onToggleUpdatePackage,
+  onUpdateExclusions,
 }: EnhancedFileItemProps) {
+  const [isExclusionManagerOpen, setIsExclusionManagerOpen] = useState(false);
+
   const formatFileSize = (bytes?: number) => {
     if (!bytes) return "";
     const units = ["B", "KB", "MB", "GB"];
@@ -113,6 +121,15 @@ export function EnhancedFileItem({
                 </span>
               </div>
             </div>
+            <div className="flex items-center space-x-3">
+                <Button variant="outline" size="sm" onClick={() => setIsExclusionManagerOpen(true)}>
+                    <Settings className="h-4 w-4 mr-2" />
+                    管理排除项
+                </Button>
+                {file.exclusions && file.exclusions.length > 0 && (
+                    <span className="text-xs text-muted-foreground">{file.exclusions.length} 个排除项</span>
+                )}
+            </div>
             
             {/* 选中状态的额外选项显示 */}
             {file.selected && (
@@ -144,6 +161,13 @@ export function EnhancedFileItem({
           </div>
         )}
       </div>
+      <ExclusionManagerDialog
+        isOpen={isExclusionManagerOpen}
+        onClose={() => setIsExclusionManagerOpen(false)}
+        basePath={file.path}
+        initialExclusions={file.exclusions || []}
+        onSave={(exclusions) => onUpdateExclusions(file.path, exclusions)}
+      />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 {
   "name": "acgstation-sync",
   "private": true,
-  "version": "1.0.9",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "format": "prettier --write \"src/**/*.ts\" && prettier --write \"src/**/*.tsx\" && prettier --write *.json && prettier --write .*.json && prettier --write *.ts && prettier --write *.js",

@@ -190,25 +190,6 @@ pub async fn validate_token(access_token: String) -> Result<UserInfo, String> {
     }
 }
 
-#[tauri::command]
-pub async fn get_user_avatar(uid: i32) -> Result<String, String> {
-    let url = format!("{}/avatar/user/{}", OAUTH_CONFIG.skin_url, uid);
-    println!("[Avatar] Fetching avatar from {}", url);
-    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-    
-    let content_type = response.headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("image/png")
-        .to_string();
-
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-    
-    let base64 = general_purpose::STANDARD.encode(&bytes);
-    Ok(format!("data:{};base64,{}", content_type, base64))
-}
-
-
 pub async fn exchange_code_for_token(code: String) -> Result<TokenResponse, Box<dyn std::error::Error + Send + Sync>> {
     println!("[OAuth] Exchanging code for access token...");
     let client = reqwest::Client::new();

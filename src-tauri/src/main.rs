@@ -1014,8 +1014,7 @@ fn main() {
             read_manifest_from_zip,
             sync_from_local_package,
             oauth::start_login,
-            oauth::validate_token,
-            oauth::get_user_avatar
+            oauth::validate_token
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

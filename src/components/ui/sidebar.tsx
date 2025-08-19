@@ -93,7 +93,8 @@ export function AuthSection() {
         const fetchAvatar = async () => {
           if (authData?.user.uid && !avatar) {
             try {
-              const avatarData = await invoke<string>('get_user_avatar', { uid: authData.user.uid });
+              const url = `https://id.jb.wiki/avatar/user/${authData.user.uid}`;
+              const avatarData = await invoke<string>('proxy_fetch_image', { url });
               setAvatar(avatarData);
             } catch (e) {
               console.error("Failed to fetch avatar:", e);

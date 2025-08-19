@@ -53,7 +53,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' https://file.iscar.net"
+      "csp": "default-src 'self'; img-src 'self' https://file.iscar.net data:"
     },
     "bundle": {
       "active": true,

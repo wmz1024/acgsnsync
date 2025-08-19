@@ -16,6 +16,7 @@ use zip::ZipArchive;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use rayon::prelude::*;
+use base64::{engine::general_purpose, Engine as _};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NewsItem {
@@ -570,6 +571,23 @@ async fn fetch_modpacks() -> Result<std::collections::HashMap<String, Modpack>, 
 }
 
 #[tauri::command]
+async fn proxy_fetch_image(url: String) -> Result<String, String> {
+    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    
+    // Get content type before consuming the response body
+    let content_type = response.headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("image/png")
+        .to_string();
+
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    
+    let base64 = general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", content_type, base64))
+}
+
+#[tauri::command]
 async fn fetch_manifest_text(url: String) -> Result<String, String> {
     reqwest::get(&url)
         .await
@@ -914,7 +932,8 @@ fn main() {
             fetch_news,
             check_for_updates,
             fetch_modpacks,
-            fetch_manifest_text
+            fetch_manifest_text,
+            proxy_fetch_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

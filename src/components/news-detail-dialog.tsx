@@ -8,6 +8,7 @@ import {
 import { ScrollArea } from './ui/scroll-area';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ProxiedImage } from './proxied-image';
 
 interface NewsItem {
     title: string;
@@ -33,7 +34,12 @@ export function NewsDetailDialog({ isOpen, onClose, newsItem }: NewsDetailDialog
                 </DialogHeader>
                 <ScrollArea className="h-96 w-full">
                     <div className="prose dark:prose-invert max-w-none p-4">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown 
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                                img: ({node, ...props}) => <ProxiedImage {...props} />
+                            }}
+                        >
                             {newsItem.content.replace(/\\n/g, '\n')}
                         </ReactMarkdown>
                     </div>

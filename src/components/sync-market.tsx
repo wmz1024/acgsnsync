@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { PlusCircle } from 'lucide-react';
 import { CustomSyncDialog } from './custom-sync-dialog';
 import { invoke } from '@tauri-apps/api';
+import { ProxiedImage } from './proxied-image';
 
 interface Modpack {
   name: string;
@@ -63,15 +64,10 @@ export function SyncMarket({ onSync }: SyncMarketProps) {
         {modpacks && Object.values(modpacks).map((pack) => (
           <Card key={pack.name}>
             <CardHeader>
-              <img 
+              <ProxiedImage 
                 src={pack.thumbnail} 
                 alt={pack.name} 
                 className="w-full h-32 object-cover rounded-t-lg" 
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.onerror = null; // Prevent infinite loop if placeholder is also missing
-                  target.src = '/tauri.svg';
-                }}
               />
               <CardTitle className="pt-4">{pack.name}</CardTitle>
               <CardDescription>作者: {pack.author}</CardDescription>

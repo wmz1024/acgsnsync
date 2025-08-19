@@ -26,6 +26,7 @@ dirs = "5.0"
 rayon = "1.10.0"
 num_cpus = "1.16.0"
 whoami = "1.5.1"
+base64 = "0.22.1"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

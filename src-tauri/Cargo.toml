@@ -1,6 +1,6 @@
 [package]
 name = "acgstation-sync"
-version = "1.2.0"
+version = "1.2.1"
 description = "ACGStation 游戏文件同步器"
 authors = ["ACGStation"]
 edition = "2021"

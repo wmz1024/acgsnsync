@@ -25,7 +25,7 @@ interface SyncOptions {
 }
 
 const THREAD_COUNT_KEY = 'sync_thread_count';
-const CURRENT_VERSION = '1.2.0'; // This should be updated by the developer for each release
+const CURRENT_VERSION = '1.2.1'; // This should be updated by the developer for each release
 
 interface UpdateInfo {
     version: string;

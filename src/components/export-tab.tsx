@@ -33,10 +33,10 @@ export function ExportTab() {
   const [isLoading, setIsLoading] = useState(false);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportSettings, setExportSettings] = useState({
-    packageName: "",
-    downloadPrefix: "https://example.com/downloads/",
+    packageName: "ACGStation-",
+    downloadPrefix: "https://file.iscar.net/d/mzclink-cn/acgsn/",
     version: "1.0.0",
-    description: "",
+    description: "# ACGStation - 包名（允许使用markdown）",
     disableHashCheck: false,
     disableSizeCheck: false,
   });

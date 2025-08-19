@@ -1,8 +1,11 @@
 import "./App.css";
 import { useState, useEffect } from "react";
+import { useAtom } from "jotai";
+import { listen } from "@tauri-apps/api/event";
+import { appWindow } from "@tauri-apps/api/window";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ModeToggle } from "@/components/mode-toggle";
-import { Sidebar, SidebarHeader, SidebarContent, SidebarNav } from "@/components/ui/sidebar";
+import { Sidebar, SidebarHeader, SidebarContent, SidebarNav, SidebarFooter, AuthSection } from "@/components/ui/sidebar";
 import { ExportTab } from "@/components/export-tab";
 import { SyncMarket } from "@/components/sync-market";
 import { SyncConfirmation } from "@/components/sync-confirmation";
@@ -13,6 +16,7 @@ import { Settings, Download, ShoppingCart, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api";
 import { Logo } from "@/components/logo";
+import { authDataAtom, avatarAtom, isSidebarCollapsedAtom } from "@/atoms";
 
 interface SyncOptions {
     manifestUrl: string;
@@ -21,12 +25,25 @@ interface SyncOptions {
 }
 
 const THREAD_COUNT_KEY = 'sync_thread_count';
-const CURRENT_VERSION = '1.1.0'; // This should be updated by the developer for each release
+const CURRENT_VERSION = '1.2.0'; // This should be updated by the developer for each release
 
 interface UpdateInfo {
     version: string;
     url: string;
 }
+
+interface AuthData {
+  token: {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+  };
+  user: {
+    uid: number;
+    nickname: string;
+  };
+}
+
 
 export const App = () => {
   const [activeTab, setActiveTab] = useState("home");
@@ -34,6 +51,22 @@ export const App = () => {
   const [syncOptions, setSyncOptions] = useState<SyncOptions | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [, setAuthData] = useAtom(authDataAtom);
+  const [, setAvatar] = useAtom(avatarAtom);
+  const [isCollapsed, setIsCollapsed] = useAtom(isSidebarCollapsedAtom);
+
+
+  // 显示 Toast 消息的函数 (简易实现)
+  const showToast = (message: string) => {
+    alert(message); // 您可以替换为更美观的 Toast 组件
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('authData');
+    setAuthData(null);
+    setAvatar(null);
+  };
+
 
   useEffect(() => {
     const applyThreadSetting = async () => {
@@ -58,8 +91,55 @@ export const App = () => {
         }
     };
 
+    const initializeAuth = async () => {
+      const storedData = localStorage.getItem('authData');
+      if (storedData) {
+        try {
+          const parsedData: AuthData = JSON.parse(storedData);
+          await invoke('validate_token', { accessToken: parsedData.token.access_token });
+          setAuthData(parsedData);
+        } catch (e) {
+          console.error("Token validation failed:", e);
+          handleLogout();
+          showToast("登录已过期，请重新登录。");
+        }
+      }
+    };
+
     applyThreadSetting();
     checkForUpdates();
+    initializeAuth();
+
+    const unlistenSuccess = listen<AuthData>('oauth_success', (event) => {
+      console.log('OAuth Success:', event.payload);
+      localStorage.setItem('authData', JSON.stringify(event.payload));
+      setAuthData(event.payload);
+    });
+
+    const unlistenError = listen<string>('oauth_error', (event) => {
+      console.error('OAuth Error:', event.payload);
+      showToast(`登录失败: ${event.payload}`);
+    });
+
+    // to call set_thread_pool on launch. The default is fine for the first run.
+    const setupWindowListeners = async () => {
+      const handleResize = async () => {
+        const isMaximized = await appWindow.isMaximized();
+        setIsCollapsed(!isMaximized);
+      };
+      // Set initial state on mount
+      handleResize();
+      const unlisten = await appWindow.onResized(handleResize);
+      return unlisten;
+    };
+
+    const unlistenResizePromise = setupWindowListeners();
+
+    return () => {
+        unlistenSuccess.then(f => f());
+        unlistenError.then(f => f());
+        unlistenResizePromise.then(unlisten => unlisten());
+    }
   }, []);
 
   const handleSync = (url: string, localPackagePath?: string, useLocalFiles?: boolean) => {
@@ -116,21 +196,28 @@ export const App = () => {
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
         <div className="flex h-screen w-screen bg-background">
-            <Sidebar>
+            <Sidebar isCollapsed={isCollapsed}>
                 <SidebarHeader>
                     <div className="flex items-center space-x-2">
-                        <Logo />
-                        <span className="font-semibold">ACGStation Sync</span>
+                        {isCollapsed ? <img src="/tauri.svg" alt="App Logo" className="w-8 h-8" /> : <Logo />}
+                        {!isCollapsed && <span className="font-semibold">ACGStation Sync</span>}
                     </div>
                 </SidebarHeader>
                 <SidebarContent>
-                    <SidebarNav items={sidebarItems} />
+                    <SidebarNav items={sidebarItems} isCollapsed={isCollapsed} />
                 </SidebarContent>
+                <SidebarFooter>
+                    <AuthSection />
+                </SidebarFooter>
                 <div className="p-2 flex justify-end gap-2 border-t">
-                    <Button variant="ghost" size="icon" onClick={() => setIsSettingsOpen(true)}>
-                        <Settings className="h-5 w-5" />
-                    </Button>
-                    <ModeToggle />
+                    {!isCollapsed && (
+                        <>
+                            <Button variant="ghost" size="icon" onClick={() => setIsSettingsOpen(true)}>
+                                <Settings className="h-5 w-5" />
+                            </Button>
+                            <ModeToggle />
+                        </>
+                    )}
                 </div>
             </Sidebar>
             <main className="flex-1 overflow-auto">

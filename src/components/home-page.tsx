@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useAtom } from 'jotai';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { ScrollArea } from './ui/scroll-area';
 import { invoke } from '@tauri-apps/api';
 import { NewsDetailDialog } from './news-detail-dialog';
+import { authDataAtom, avatarAtom } from '@/atoms';
 
 interface NewsItem {
   title: string;
@@ -11,21 +13,13 @@ interface NewsItem {
 }
 
 export function HomePage() {
-  const [userName, setUserName] = useState('User');
   const [news, setNews] = useState<NewsItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
+  const [authData] = useAtom(authDataAtom);
+  const [avatar] = useAtom(avatarAtom);
 
   useEffect(() => {
-    const fetchUserName = async () => {
-      try {
-        const name = await invoke<string>('get_username');
-        setUserName(name);
-      } catch (e) {
-        console.error("Could not get username", e);
-      }
-    };
-
     const fetchNews = async () => {
       try {
         const data = await invoke<NewsItem[]>('fetch_news');
@@ -35,13 +29,21 @@ export function HomePage() {
       }
     };
 
-    fetchUserName();
     fetchNews();
   }, []);
 
   return (
     <div className="p-6 h-full flex flex-col">
-      <h1 className="text-3xl font-bold mb-4">欢迎, {userName}</h1>
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex items-center space-x-4">
+            {authData && avatar && (
+                <img src={avatar} alt="User Avatar" className="w-12 h-12" />
+            )}
+            <h1 className="text-3xl font-bold">
+                欢迎, {authData ? authData.user.nickname : '匿名用户'}
+            </h1>
+        </div>
+      </div>
       <div className="flex-grow flex flex-col">
         <Card>
             <CardHeader>

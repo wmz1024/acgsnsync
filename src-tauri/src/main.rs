@@ -19,6 +19,8 @@ use rayon::prelude::*;
 use base64::{engine::general_purpose, Engine as _};
 use std::io::Read;
 
+mod oauth;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct NewsItem {
   title: String,
@@ -610,7 +612,7 @@ async fn sync_from_local_package(
     let manifest_str = read_manifest_from_zip(zip_path.clone())?;
     let manifest: Manifest = serde_json::from_str(&manifest_str).map_err(|e| e.to_string())?;
     
-    let local_files = scan_local_files(&get_scan_dirs(&manifest, &target_dir));
+    let _local_files = scan_local_files(&get_scan_dirs(&manifest, &target_dir));
 
     let files_to_process = manifest.files.clone();
     let mut files_to_install = Vec::new();
@@ -987,6 +989,7 @@ fn save_exclusion_list(target_dir: String, excluded_files: Vec<String>) -> Resul
 fn main() {
     tauri::Builder::default()
         .setup(|_app| {
+            oauth::setup_oauth_server();
             // Initialize the thread pool on startup
             // We don't have access to local storage here yet, so we'll rely on the frontend
             // to call set_thread_pool on launch. The default is fine for the first run.
@@ -1009,7 +1012,10 @@ fn main() {
             fetch_manifest_text,
             proxy_fetch_image,
             read_manifest_from_zip,
-            sync_from_local_package
+            sync_from_local_package,
+            oauth::start_login,
+            oauth::validate_token,
+            oauth::get_user_avatar
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -18,8 +18,10 @@ use std::collections::HashSet;
 use rayon::prelude::*;
 use base64::{engine::general_purpose, Engine as _};
 use std::io::Read;
+use tauri::Manager;
 
 mod oauth;
+mod systeminfo;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NewsItem {
@@ -988,11 +990,24 @@ fn save_exclusion_list(target_dir: String, excluded_files: Vec<String>) -> Resul
 
 fn main() {
     tauri::Builder::default()
-        .setup(|_app| {
+        .setup(|app| {
+            let app_handle = app.handle();
+            let log_dir = app_handle.path_resolver()
+                .app_log_dir()
+                .expect("Failed to get log dir");
+
+            if !log_dir.exists() {
+                std::fs::create_dir_all(&log_dir).expect("Failed to create log dir");
+            }
+
+            let file_appender = tracing_appender::rolling::daily(log_dir, "app.log");
+            let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+            tracing_subscriber::fmt()
+                .with_writer(non_blocking)
+                .init();
+                
             oauth::setup_oauth_server();
-            // Initialize the thread pool on startup
-            // We don't have access to local storage here yet, so we'll rely on the frontend
-            // to call set_thread_pool on launch. The default is fine for the first run.
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1014,10 +1029,32 @@ fn main() {
             read_manifest_from_zip,
             sync_from_local_package,
             oauth::start_login,
-            oauth::validate_token
+            oauth::validate_token,
+            systeminfo::get_system_info,
+            read_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+fn read_logs(app: tauri::AppHandle) -> Result<String, String> {
+    let log_dir = app.path_resolver().app_log_dir().ok_or("Could not find log dir")?;
+    
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let log_file_name = format!("app.log.{}", today);
+    let log_file = log_dir.join(log_file_name);
+
+    if log_file.exists() {
+        fs::read_to_string(log_file).map_err(|e| e.to_string())
+    } else {
+        let fallback_log = log_dir.join("app.log");
+        if fallback_log.exists() {
+            fs::read_to_string(fallback_log).map_err(|e| e.to_string())
+        } else {
+            Ok("Log file not found.".to_string())
+        }
+    }
 }
 
 fn get_scan_dirs(manifest: &Manifest, target_dir: &str) -> Vec<PathBuf> {

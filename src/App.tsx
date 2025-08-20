@@ -12,11 +12,13 @@ import { SyncConfirmation } from "@/components/sync-confirmation";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import { HomePage } from "@/components/home-page";
-import { Settings, Download, ShoppingCart, Home, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Settings, Download, ShoppingCart, Home, PanelLeftClose, PanelLeftOpen, Computer, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api";
 import { Logo } from "@/components/logo";
 import { authDataAtom, avatarAtom, isSidebarCollapsedAtom } from "@/atoms";
+import { SystemInfoTab } from "@/components/system-info-tab";
+import { AboutPage } from "@/components/about-page";
 
 interface SyncOptions {
     manifestUrl: string;
@@ -25,7 +27,7 @@ interface SyncOptions {
 }
 
 const THREAD_COUNT_KEY = 'sync_thread_count';
-const CURRENT_VERSION = '1.2.1'; // This should be updated by the developer for each release
+const CURRENT_VERSION = '1.2.2'; // This should be updated by the developer for each release
 
 interface UpdateInfo {
     version: string;
@@ -174,6 +176,18 @@ export const App = () => {
         setView('market'); // Reset to market view when tab is clicked
       },
     },
+    {
+      title: "系统信息",
+      icon: <Computer className="h-4 w-4" />,
+      isActive: activeTab === "system_info",
+      onClick: () => setActiveTab("system_info"),
+    },
+    {
+      title: "关于Sync",
+      icon: <HelpCircle className="h-4 w-4" />,
+      isActive: activeTab === "about",
+      onClick: () => setActiveTab("about"),
+    },
   ];
 
   const renderContent = () => {
@@ -187,7 +201,11 @@ export const App = () => {
             return <SyncConfirmation syncOptions={syncOptions} onBack={handleBack} />;
         }
         return <SyncMarket onSync={handleSync} />;
-      default:
+      case "system_info":
+        return <SystemInfoTab />;
+      case "about":
+        return <AboutPage />;
+    default:
         return <HomePage />;
     }
   };

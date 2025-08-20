@@ -12,7 +12,7 @@ import { SyncConfirmation } from "@/components/sync-confirmation";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import { HomePage } from "@/components/home-page";
-import { Settings, Download, ShoppingCart, Home } from "lucide-react";
+import { Settings, Download, ShoppingCart, Home, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api";
 import { Logo } from "@/components/logo";
@@ -210,8 +210,15 @@ export const App = () => {
                     <AuthSection />
                 </SidebarFooter>
                 <div className="p-2 flex justify-end gap-2 border-t">
-                    {!isCollapsed && (
+                    {isCollapsed ? (
+                        <Button variant="ghost" size="icon" onClick={() => setIsCollapsed(false)}>
+                            <PanelLeftOpen className="h-4 w-4" />
+                        </Button>
+                    ) : (
                         <>
+                            <Button variant="ghost" size="icon" onClick={() => setIsCollapsed(true)}>
+                                <PanelLeftClose className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" onClick={() => setIsSettingsOpen(true)}>
                                 <Settings className="h-5 w-5" />
                             </Button>

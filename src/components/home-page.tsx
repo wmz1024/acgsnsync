@@ -40,7 +40,7 @@ export function HomePage() {
                 <img src={avatar} alt="User Avatar" className="w-12 h-12" />
             )}
             <h1 className="text-3xl font-bold">
-                欢迎, {authData ? authData.user.nickname : '匿名用户'}
+                欢迎, {authData ? authData.user.nickname : '来自ACGStation的访客'}
             </h1>
         </div>
       </div>

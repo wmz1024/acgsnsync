@@ -83,14 +83,29 @@ pub async fn get_version_manifest(source: String) -> Result<VersionManifest, Str
         _ => return Err("不支持的下载源".to_string()),
     };
     
-    let response = reqwest::get(url)
-        .await
-        .map_err(|e| format!("获取版本清单失败: {}", e))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
     
-    let manifest: VersionManifest = response
-        .json()
+    let response = client
+        .get(url)
+        .send()
         .await
-        .map_err(|e| format!("解析版本清单失败: {}", e))?;
+        .map_err(|e| format!("获取版本清单失败: {}。请检查网络连接。", e))?;
+    
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("服务器返回错误: HTTP {}", status));
+    }
+    
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("读取响应内容失败: {}", e))?;
+    
+    let manifest: VersionManifest = serde_json::from_str(&text)
+        .map_err(|e| format!("解析 JSON 失败: {}。响应内容: {}", e, &text[..text.len().min(200)]))?;
     
     Ok(manifest)
 }
@@ -108,6 +123,12 @@ pub async fn download_minecraft_version(
     
     fs::create_dir_all(&versions_dir).map_err(|e| format!("创建版本目录失败: {}", e))?;
     
+    // 创建 HTTP 客户端
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    
     // 下载版本 JSON
     let version_url = if source == "bmclapi" {
         version_url.replace("launchermeta.mojang.com", "bmclapi2.bangbang93.com")
@@ -115,14 +136,23 @@ pub async fn download_minecraft_version(
         version_url
     };
     
-    let response = reqwest::get(&version_url)
+    let response = client
+        .get(&version_url)
+        .send()
         .await
-        .map_err(|e| format!("下载版本信息失败: {}", e))?;
+        .map_err(|e| format!("下载版本信息失败: {}。请检查网络连接。", e))?;
     
-    let version_json: serde_json::Value = response
-        .json()
+    if !response.status().is_success() {
+        return Err(format!("服务器返回错误: HTTP {}", response.status()));
+    }
+    
+    let text = response
+        .text()
         .await
-        .map_err(|e| format!("解析版本信息失败: {}", e))?;
+        .map_err(|e| format!("读取版本信息失败: {}", e))?;
+    
+    let version_json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("解析版本 JSON 失败: {}", e))?;
     
     let version_file = versions_dir.join(format!("{}.json", version_id));
     fs::write(&version_file, serde_json::to_string_pretty(&version_json).unwrap())
@@ -139,9 +169,15 @@ pub async fn download_minecraft_version(
                     client_url.to_string()
                 };
                 
-                let client_response = reqwest::get(&client_url)
+                let client_response = client
+                    .get(&client_url)
+                    .send()
                     .await
                     .map_err(|e| format!("下载客户端失败: {}", e))?;
+                
+                if !client_response.status().is_success() {
+                    return Err(format!("下载客户端失败: HTTP {}", client_response.status()));
+                }
                 
                 let client_jar = versions_dir.join(format!("{}.jar", version_id));
                 let bytes = client_response
@@ -156,10 +192,10 @@ pub async fn download_minecraft_version(
     }
     
     // 下载依赖库
-    download_libraries(&version_json, &mc_dir, &source).await?;
+    download_libraries(&version_json, &mc_dir, &source, &client).await?;
     
     // 下载资源文件
-    download_assets(&version_json, &mc_dir, &source).await?;
+    download_assets(&version_json, &mc_dir, &source, &client).await?;
     
     Ok(format!("版本 {} 下载完成", version_id))
 }
@@ -169,6 +205,7 @@ async fn download_libraries(
     version_json: &serde_json::Value,
     mc_dir: &Path,
     source: &str,
+    client: &reqwest::Client,
 ) -> Result<(), String> {
     let libraries_dir = mc_dir.join("libraries");
     fs::create_dir_all(&libraries_dir).map_err(|e| format!("创建库目录失败: {}", e))?;
@@ -197,9 +234,11 @@ async fn download_libraries(
                         }
                         
                         // 下载库文件
-                        if let Ok(response) = reqwest::get(&lib_url).await {
-                            if let Ok(bytes) = response.bytes().await {
-                                fs::write(&lib_file, bytes).ok();
+                        if let Ok(response) = client.get(&lib_url).send().await {
+                            if response.status().is_success() {
+                                if let Ok(bytes) = response.bytes().await {
+                                    fs::write(&lib_file, bytes).ok();
+                                }
                             }
                         }
                     }
@@ -216,6 +255,7 @@ async fn download_assets(
     version_json: &serde_json::Value,
     mc_dir: &Path,
     source: &str,
+    client: &reqwest::Client,
 ) -> Result<(), String> {
     let assets_dir = mc_dir.join("assets");
     fs::create_dir_all(&assets_dir).map_err(|e| format!("创建资源目录失败: {}", e))?;
@@ -228,37 +268,41 @@ async fn download_assets(
                 asset_url.to_string()
             };
             
-            if let Ok(response) = reqwest::get(&asset_url).await {
-                if let Ok(asset_json) = response.json::<serde_json::Value>().await {
-                    if let Some(objects) = asset_json.get("objects").and_then(|o| o.as_object()) {
-                        let objects_dir = assets_dir.join("objects");
-                        fs::create_dir_all(&objects_dir).ok();
-                        
-                        // 只下载部分关键资源（完整下载资源文件会非常大）
-                        let mut count = 0;
-                        for (_, obj) in objects.iter().take(100) { // 限制下载数量
-                            if let Some(hash) = obj.get("hash").and_then(|h| h.as_str()) {
-                                let hash_prefix = &hash[..2];
-                                let asset_file = objects_dir.join(hash_prefix).join(hash);
+            if let Ok(response) = client.get(&asset_url).send().await {
+                if response.status().is_success() {
+                    if let Ok(text) = response.text().await {
+                        if let Ok(asset_json) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if let Some(objects) = asset_json.get("objects").and_then(|o| o.as_object()) {
+                                let objects_dir = assets_dir.join("objects");
+                                fs::create_dir_all(&objects_dir).ok();
                                 
-                                if asset_file.exists() {
-                                    continue;
-                                }
-                                
-                                let asset_url = if source == "bmclapi" {
-                                    format!("https://bmclapi2.bangbang93.com/assets/{}/{}", hash_prefix, hash)
-                                } else {
-                                    format!("https://resources.download.minecraft.net/{}/{}", hash_prefix, hash)
-                                };
-                                
-                                if let Some(parent) = asset_file.parent() {
-                                    fs::create_dir_all(parent).ok();
-                                }
-                                
-                                if let Ok(response) = reqwest::get(&asset_url).await {
-                                    if let Ok(bytes) = response.bytes().await {
-                                        fs::write(&asset_file, bytes).ok();
-                                        count += 1;
+                                // 只下载部分关键资源（完整下载资源文件会非常大）
+                                for (_, obj) in objects.iter().take(100) { // 限制下载数量
+                                    if let Some(hash) = obj.get("hash").and_then(|h| h.as_str()) {
+                                        let hash_prefix = &hash[..2];
+                                        let asset_file = objects_dir.join(hash_prefix).join(hash);
+                                        
+                                        if asset_file.exists() {
+                                            continue;
+                                        }
+                                        
+                                        let asset_url = if source == "bmclapi" {
+                                            format!("https://bmclapi2.bangbang93.com/assets/{}/{}", hash_prefix, hash)
+                                        } else {
+                                            format!("https://resources.download.minecraft.net/{}/{}", hash_prefix, hash)
+                                        };
+                                        
+                                        if let Some(parent) = asset_file.parent() {
+                                            fs::create_dir_all(parent).ok();
+                                        }
+                                        
+                                        if let Ok(response) = client.get(&asset_url).send().await {
+                                            if response.status().is_success() {
+                                                if let Ok(bytes) = response.bytes().await {
+                                                    fs::write(&asset_file, bytes).ok();
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -367,13 +411,27 @@ fn get_compatible_mc_versions(java_version: &str) -> Vec<String> {
 pub async fn get_forge_versions(mc_version: String) -> Result<Vec<String>, String> {
     let url = format!("https://bmclapi2.bangbang93.com/forge/minecraft/{}", mc_version);
     
-    let response = reqwest::get(&url)
-        .await
-        .map_err(|e| format!("获取 Forge 版本失败: {}", e))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
     
-    let versions: Vec<serde_json::Value> = response
-        .json()
+    let response = client
+        .get(&url)
+        .send()
         .await
+        .map_err(|e| format!("获取 Forge 版本失败: {}。请检查网络连接。", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("服务器返回错误: HTTP {}。该版本可能没有可用的 Forge。", response.status()));
+    }
+    
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    
+    let versions: Vec<serde_json::Value> = serde_json::from_str(&text)
         .map_err(|e| format!("解析 Forge 版本失败: {}", e))?;
     
     let forge_versions: Vec<String> = versions
@@ -381,6 +439,10 @@ pub async fn get_forge_versions(mc_version: String) -> Result<Vec<String>, Strin
         .filter_map(|v| v.get("version").and_then(|ver| ver.as_str()))
         .map(|s| s.to_string())
         .collect();
+    
+    if forge_versions.is_empty() {
+        return Err(format!("Minecraft {} 没有可用的 Forge 版本", mc_version));
+    }
     
     Ok(forge_versions)
 }
@@ -393,7 +455,6 @@ pub async fn install_forge(
     forge_version: String,
 ) -> Result<String, String> {
     let mc_dir = get_minecraft_dir(&app)?;
-    let versions_dir = mc_dir.join("versions");
     
     // 下载 Forge 安装器
     let url = format!(
@@ -401,9 +462,20 @@ pub async fn install_forge(
         mc_version, forge_version
     );
     
-    let response = reqwest::get(&url)
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    
+    let response = client
+        .get(&url)
+        .send()
         .await
-        .map_err(|e| format!("下载 Forge 失败: {}", e))?;
+        .map_err(|e| format!("下载 Forge 失败: {}。请检查网络连接。", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("下载 Forge 失败: HTTP {}", response.status()));
+    }
     
     let installer_path = mc_dir.join(format!("forge-{}-{}-installer.jar", mc_version, forge_version));
     let bytes = response.bytes().await.map_err(|e| format!("读取 Forge 数据失败: {}", e))?;
@@ -411,7 +483,8 @@ pub async fn install_forge(
     fs::write(&installer_path, bytes)
         .map_err(|e| format!("保存 Forge 安装器失败: {}", e))?;
     
-    Ok(format!("Forge {}-{} 下载完成，请手动运行安装器", mc_version, forge_version))
+    Ok(format!("Forge {}-{} 下载完成，保存路径: {}。请手动运行安装器完成安装。", 
+        mc_version, forge_version, installer_path.to_string_lossy()))
 }
 
 // 获取 Optifine 版本列表
@@ -419,13 +492,27 @@ pub async fn install_forge(
 pub async fn get_optifine_versions(mc_version: String) -> Result<Vec<String>, String> {
     let url = format!("https://bmclapi2.bangbang93.com/optifine/{}", mc_version);
     
-    let response = reqwest::get(&url)
-        .await
-        .map_err(|_| "获取 Optifine 版本失败，可能该版本没有可用的 Optifine".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
     
-    let versions: Vec<serde_json::Value> = response
-        .json()
+    let response = client
+        .get(&url)
+        .send()
         .await
+        .map_err(|e| format!("获取 Optifine 版本失败: {}。可能该版本没有可用的 Optifine。", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("服务器返回错误: HTTP {}。该版本可能没有可用的 Optifine。", response.status()));
+    }
+    
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    
+    let versions: Vec<serde_json::Value> = serde_json::from_str(&text)
         .map_err(|e| format!("解析 Optifine 版本失败: {}", e))?;
     
     let optifine_versions: Vec<String> = versions
@@ -433,6 +520,10 @@ pub async fn get_optifine_versions(mc_version: String) -> Result<Vec<String>, St
         .filter_map(|v| v.get("type").and_then(|t| t.as_str()))
         .map(|s| s.to_string())
         .collect();
+    
+    if optifine_versions.is_empty() {
+        return Err(format!("Minecraft {} 没有可用的 Optifine 版本", mc_version));
+    }
     
     Ok(optifine_versions)
 }
@@ -452,9 +543,20 @@ pub async fn install_optifine(
         mc_version, optifine_type
     );
     
-    let response = reqwest::get(&url)
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    
+    let response = client
+        .get(&url)
+        .send()
         .await
-        .map_err(|e| format!("下载 Optifine 失败: {}", e))?;
+        .map_err(|e| format!("下载 Optifine 失败: {}。请检查网络连接。", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("下载 Optifine 失败: HTTP {}", response.status()));
+    }
     
     let installer_path = mc_dir.join(format!("optifine-{}-{}.jar", mc_version, optifine_type));
     let bytes = response.bytes().await.map_err(|e| format!("读取 Optifine 数据失败: {}", e))?;
@@ -462,7 +564,8 @@ pub async fn install_optifine(
     fs::write(&installer_path, bytes)
         .map_err(|e| format!("保存 Optifine 失败: {}", e))?;
     
-    Ok(format!("Optifine {}-{} 下载完成", mc_version, optifine_type))
+    Ok(format!("Optifine {}-{} 下载完成，保存路径: {}", 
+        mc_version, optifine_type, installer_path.to_string_lossy()))
 }
 
 // Authlib-Injector 登录
@@ -472,7 +575,10 @@ pub async fn authlib_login(
     username: String,
     password: String,
 ) -> Result<AuthlibAccount, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
     
     let login_url = format!("{}/authserver/authenticate", server_url.trim_end_matches('/'));
     
@@ -487,15 +593,20 @@ pub async fn authlib_login(
         .json(&payload)
         .send()
         .await
-        .map_err(|e| format!("登录请求失败: {}", e))?;
+        .map_err(|e| format!("登录请求失败: {}。请检查服务器地址和网络连接。", e))?;
     
-    if !response.status().is_success() {
-        return Err(format!("登录失败: HTTP {}", response.status()));
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("登录失败: HTTP {}。错误信息: {}", status, error_text));
     }
     
-    let result: serde_json::Value = response
-        .json()
+    let text = response
+        .text()
         .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    
+    let result: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("解析登录响应失败: {}", e))?;
     
     let access_token = result
@@ -536,14 +647,28 @@ pub async fn download_authlib_injector(app: AppHandle) -> Result<String, String>
         return Ok(authlib_path.to_string_lossy().to_string());
     }
     
-    let url = "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/latest.json";
-    let response = reqwest::get(url)
-        .await
-        .map_err(|e| format!("获取 authlib-injector 信息失败: {}", e))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
     
-    let info: serde_json::Value = response
-        .json()
+    let url = "https://bmclapi2.bangbang93.com/mirrors/authlib-injector/artifact/latest.json";
+    let response = client
+        .get(url)
+        .send()
         .await
+        .map_err(|e| format!("获取 authlib-injector 信息失败: {}。请检查网络连接。", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("服务器返回错误: HTTP {}", response.status()));
+    }
+    
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    
+    let info: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("解析 authlib-injector 信息失败: {}", e))?;
     
     let download_url = info
@@ -551,9 +676,15 @@ pub async fn download_authlib_injector(app: AppHandle) -> Result<String, String>
         .and_then(|u| u.as_str())
         .ok_or("未找到下载链接")?;
     
-    let response = reqwest::get(download_url)
+    let response = client
+        .get(download_url)
+        .send()
         .await
         .map_err(|e| format!("下载 authlib-injector 失败: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("下载 authlib-injector 失败: HTTP {}", response.status()));
+    }
     
     let bytes = response.bytes().await.map_err(|e| format!("读取数据失败: {}", e))?;
     fs::write(&authlib_path, bytes).map_err(|e| format!("保存文件失败: {}", e))?;

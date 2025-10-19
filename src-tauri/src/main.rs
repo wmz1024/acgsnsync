@@ -18,7 +18,6 @@ use std::collections::HashSet;
 use rayon::prelude::*;
 use base64::{engine::general_purpose, Engine as _};
 use std::io::Read;
-use tauri::Manager;
 
 mod oauth;
 mod systeminfo;

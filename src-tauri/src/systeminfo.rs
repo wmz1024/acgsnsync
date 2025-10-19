@@ -57,7 +57,7 @@ struct ComponentInfo {
 
 #[tauri::command]
 pub fn get_system_info() -> Result<SystemInfo, String> {
-    let mut sys = System::new_all();
+    let sys = System::new_all();
 
     let os_info = OsInfo {
         os_type: System::name().unwrap_or_else(|| "N/A".to_string()),

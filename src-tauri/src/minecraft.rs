@@ -160,8 +160,8 @@ pub async fn download_minecraft_version(
     
     // 下载客户端 JAR
     if let Some(downloads) = version_json.get("downloads") {
-        if let Some(client) = downloads.get("client") {
-            if let Some(client_url) = client.get("url").and_then(|u| u.as_str()) {
+        if let Some(client_info) = downloads.get("client") {
+            if let Some(client_url) = client_info.get("url").and_then(|u| u.as_str()) {
                 let client_url = if source == "bmclapi" {
                     client_url.replace("launcher.mojang.com", "bmclapi2.bangbang93.com")
                         .replace("resources.download.minecraft.net", "bmclapi2.bangbang93.com/assets")

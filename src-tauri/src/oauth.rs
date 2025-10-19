@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use tauri::Manager;
 use tiny_http::{Header, Response, Server};
 use url::Url;
-use base64::{engine::general_purpose, Engine as _};
 
 static LOGIN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static AUTH_CODE: Lazy<Arc<Mutex<Option<String>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));

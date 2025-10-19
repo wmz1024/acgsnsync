@@ -74,9 +74,21 @@ fn get_minecraft_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(mc_dir)
 }
 
+// 将 Mojang 官方 URL 转换为 BMCLAPI 镜像 URL
+// 参考文档：https://bmclapidoc.bangbang93.com/
+fn convert_to_bmclapi(url: &str) -> String {
+    url.replace("launchermeta.mojang.com", "bmclapi2.bangbang93.com")
+        .replace("launcher.mojang.com", "bmclapi2.bangbang93.com")
+        .replace("piston-data.mojang.com", "bmclapi2.bangbang93.com")
+        .replace("piston-meta.mojang.com", "bmclapi2.bangbang93.com")
+        .replace("libraries.minecraft.net", "bmclapi2.bangbang93.com/maven")
+        .replace("resources.download.minecraft.net", "bmclapi2.bangbang93.com/assets")
+}
+
 // 获取版本清单
 #[tauri::command]
 pub async fn get_version_manifest(source: String) -> Result<VersionManifest, String> {
+    // 根据 BMCLAPI 文档：https://bmclapidoc.bangbang93.com/
     let url = match source.as_str() {
         "official" => "https://launchermeta.mojang.com/mc/game/version_manifest.json",
         "bmclapi" => "https://bmclapi2.bangbang93.com/mc/game/version_manifest.json",
@@ -131,7 +143,7 @@ pub async fn download_minecraft_version(
     
     // 下载版本 JSON
     let version_url = if source == "bmclapi" {
-        version_url.replace("launchermeta.mojang.com", "bmclapi2.bangbang93.com")
+        convert_to_bmclapi(&version_url)
     } else {
         version_url
     };
@@ -162,9 +174,9 @@ pub async fn download_minecraft_version(
     if let Some(downloads) = version_json.get("downloads") {
         if let Some(client_info) = downloads.get("client") {
             if let Some(client_url) = client_info.get("url").and_then(|u| u.as_str()) {
+                // 根据 BMCLAPI 文档进行 URL 替换
                 let client_url = if source == "bmclapi" {
-                    client_url.replace("launcher.mojang.com", "bmclapi2.bangbang93.com")
-                        .replace("resources.download.minecraft.net", "bmclapi2.bangbang93.com/assets")
+                    convert_to_bmclapi(client_url)
                 } else {
                     client_url.to_string()
                 };
@@ -219,7 +231,7 @@ async fn download_libraries(
                         artifact.get("path").and_then(|p| p.as_str()),
                     ) {
                         let lib_url = if source == "bmclapi" {
-                            lib_url.replace("libraries.minecraft.net", "bmclapi2.bangbang93.com/maven")
+                            convert_to_bmclapi(lib_url)
                         } else {
                             lib_url.to_string()
                         };
@@ -263,7 +275,7 @@ async fn download_assets(
     if let Some(asset_index) = version_json.get("assetIndex") {
         if let Some(asset_url) = asset_index.get("url").and_then(|u| u.as_str()) {
             let asset_url = if source == "bmclapi" {
-                asset_url.replace("launchermeta.mojang.com", "bmclapi2.bangbang93.com")
+                convert_to_bmclapi(asset_url)
             } else {
                 asset_url.to_string()
             };

@@ -12,13 +12,15 @@ import { SyncConfirmation } from "@/components/sync-confirmation";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import { HomePage } from "@/components/home-page";
-import { Settings, Download, ShoppingCart, Home, PanelLeftClose, PanelLeftOpen, Computer, HelpCircle } from "lucide-react";
+import { MinecraftLauncher } from "@/components/minecraft-launcher";
+import { Settings, Download, ShoppingCart, Home, PanelLeftClose, PanelLeftOpen, Computer, HelpCircle, Gamepad2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api";
 import { Logo } from "@/components/logo";
 import { authDataAtom, avatarAtom, isSidebarCollapsedAtom } from "@/atoms";
 import { SystemInfoTab } from "@/components/system-info-tab";
 import { AboutPage } from "@/components/about-page";
+import { Toaster } from "@/components/ui/toaster";
 
 interface SyncOptions {
     manifestUrl: string;
@@ -177,6 +179,12 @@ export const App = () => {
       },
     },
     {
+      title: "Minecraft",
+      icon: <Gamepad2 className="h-4 w-4" />,
+      isActive: activeTab === "minecraft",
+      onClick: () => setActiveTab("minecraft"),
+    },
+    {
       title: "系统信息",
       icon: <Computer className="h-4 w-4" />,
       isActive: activeTab === "system_info",
@@ -201,6 +209,8 @@ export const App = () => {
             return <SyncConfirmation syncOptions={syncOptions} onBack={handleBack} />;
         }
         return <SyncMarket onSync={handleSync} />;
+      case "minecraft":
+        return <MinecraftLauncher />;
       case "system_info":
         return <SystemInfoTab />;
       case "about":
@@ -258,6 +268,7 @@ export const App = () => {
             url={updateInfo.url}
         />
        )}
+       <Toaster />
     </ThemeProvider>
   );
 };

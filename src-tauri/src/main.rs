@@ -22,6 +22,7 @@ use tauri::Manager;
 
 mod oauth;
 mod systeminfo;
+mod minecraft;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NewsItem {
@@ -1031,7 +1032,18 @@ fn main() {
             oauth::start_login,
             oauth::validate_token,
             systeminfo::get_system_info,
-            read_logs
+            read_logs,
+            minecraft::get_version_manifest,
+            minecraft::download_minecraft_version,
+            minecraft::detect_java_versions,
+            minecraft::get_forge_versions,
+            minecraft::install_forge,
+            minecraft::get_optifine_versions,
+            minecraft::install_optifine,
+            minecraft::authlib_login,
+            minecraft::download_authlib_injector,
+            minecraft::launch_minecraft,
+            minecraft::get_installed_versions
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -153,7 +153,7 @@ function toast({ ...props }: Omit<ToasterToast, "id">) {
       ...props,
       id,
       open: true,
-      onOpenChange: (open) => {
+      onOpenChange: (open: boolean) => {
         if (!open) dismiss()
       },
     } as any,

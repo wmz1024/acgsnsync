@@ -8,9 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Progress } from './ui/progress';
 import { ScrollArea } from './ui/scroll-area';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { RadioGroup, RadioGroupItem } from './ui/radio-group';
-import { Loader2, Download, Play, Trash2, Settings, User, Coffee } from 'lucide-react';
+import { Loader2, Download, Play, User, Coffee } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface MinecraftVersion {
